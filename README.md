@@ -247,6 +247,11 @@ That forwards `add` to pnpm in the profile directory and then reconciles the pro
 This package's own `cordis.patch.yml` is therefore applied on the next boot — it registers the
 provider and points the `web` seam at `brave-official` — and there is no patch file to edit.
 
+To move a git-pinned install to a newer revision, use `update` rather than a second `add`: pnpm
+skips resolution when the spec string is unchanged, so a repeated `add` keeps the old commit.
+`dsh plugin --profile web update @coldcanuk/dsh-web-search-brave` re-resolves the pin and
+reconciles the bundle list on the same run.
+
 If `dsh` is not on your PATH, that is expected when the harness was started with
 `npx @deepseek-ai/dsh …`: npx installs the CLI into its own cache and prepends that cache's
 `.bin` to the process it launches, so nothing lands in your shell PATH or in the global npm bin.
