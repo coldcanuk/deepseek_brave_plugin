@@ -25,6 +25,12 @@ The repository is public and holds no credential of any kind. In particular:
   `node:http` server and uses an obviously fake fixture value; it passes with no key at all.
 - `.gitignore` excludes `.env`, `.env.*` (with `.env.example` re-included), `*.pem`, `*.key`,
   `*.p12`, `*.pfx`, `*.secret`, `credentials.json`, `secrets.json`, and `.dsh/`.
+- The claim is checked rather than asserted: `npm run check:secrets` inspects every
+  commit-eligible file — tracked, plus untracked files `.gitignore` does not exclude, i.e. exactly
+  what `git add -A` would publish — for Brave tokens, subscription-token assignments, quoted
+  API-key assignments, AWS access-key ids, GitHub and OpenAI-style tokens, and PEM private keys. It
+  prints the path, the line, and the pattern name, and never the matched text: a finding must not
+  leak what it found. Run it before every push; it exits non-zero on anything.
 
 ## Install source: verify it
 

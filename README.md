@@ -380,13 +380,17 @@ npm install
 npm test
 ```
 
-`npm test` runs `node --test "test/**/*.test.js"` — 92 tests across
-`test/config.test.js`, `test/map.test.js`, `test/client.test.js`, `test/provider.test.js`, and
-`test/plugin.test.js`. The suite is hermetic: the provider tests start a real `node:http` server on
-an ephemeral loopback port (`test/helpers/mock-brave.js`) and point `baseURL` at it, so no test
-touches the public internet and none needs an API key. The transport tests drive an injected
-`fetch`, so retry, timeout, and cancellation behavior is asserted deterministically rather than by
-sleeping.
+`npm test` runs `node --test "test/**/*.test.js"` — 117 tests across `test/config.test.js`,
+`test/map.test.js`, `test/client.test.js`, `test/provider.test.js`, `test/plugin.test.js`, and
+`test/secrets.test.js`. The suite is hermetic: the provider tests start a real `node:http` server
+on an ephemeral loopback port (`test/helpers/mock-brave.js`) and point `baseURL` at it, so no test
+touches the public internet, none needs an API key, and none spawns a real `secret-tool` or `pass`
+(an injected `execFile` seam stands in). The transport tests drive an injected `fetch`, so retry,
+timeout, and cancellation behavior is asserted deterministically rather than by sleeping.
+
+`npm run check:secrets` is the credential scan. It reads exactly what `git add -A` would publish —
+tracked files plus untracked files `.gitignore` does not exclude — and exits non-zero if anything
+looks like a key, printing the path, the line, and the pattern name but never the matched text.
 
 The script names the test files explicitly because Node 22 and newer treat positional arguments to
 `node --test` as glob patterns; a bare directory (`node --test test/`) is matched as a path and
@@ -401,10 +405,12 @@ lib/errors.js      WebError helpers, abort classification, redaction
 lib/map.js         pure Brave response -> WebSearchResult mappers
 lib/client.js      URL building, fetch, timeout, retry, throttle
 lib/provider.js    BraveSearchProvider (id, available, search)
+lib/secrets.js     GNOME keyring and pass lookups for the credential
 lib/types/*.d.ts   hand-authored declarations for every lib module
 cordis.patch.yml   bundle patch layer: registers the provider, pins ctx.web at
                    brave-official, and ships so `dsh plugin add` composes it
-test/              node:test suite plus the mock Brave server
+scripts/           check-secrets.mjs: the credential scan behind `npm run check:secrets`
+test/              node:test suite plus the mock Brave server and the fake tool runners
 ```
 
 ## License

@@ -44,6 +44,7 @@ test-results/
 *.tsbuildinfo
 .cache/
 .npm-cache/
+.dts-check/
 dist/
 build/
 out/

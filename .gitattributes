@@ -3,5 +3,7 @@
 *.bat text eol=crlf
 *.cmd text eol=crlf
 
-# Mark generated/vendored trees as non-diffable in review UIs.
-package-lock.json -diff linguist-generated
+# Keep the lockfile out of GitHub's language statistics, but leave it diffable:
+# a `-diff` attribute makes git treat it as binary, so `git grep` silently
+# skips it — including in a secret scan.
+package-lock.json linguist-generated

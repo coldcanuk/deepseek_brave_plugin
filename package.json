@@ -50,7 +50,8 @@
     }
   },
   "scripts": {
-    "test": "node --test \"test/**/*.test.js\""
+    "test": "node --test \"test/**/*.test.js\"",
+    "check:secrets": "node scripts/check-secrets.mjs"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.2",
