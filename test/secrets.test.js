@@ -42,7 +42,7 @@ test('secretAttributes drops unusable pairs and bounds the list', () => {
   assert.deepEqual(secretAttributes({ service: 42 }), []);
   assert.deepEqual(secretAttributes(null), []);
   assert.deepEqual(secretAttributes(['a', 'b']), []);
-  assert.equal(secretAttributes(Object.fromEntries(Array.from({ length: 40 }, (unused, index) => ['k' + index, 'v']))).length, 16);
+  assert.equal(secretAttributes(Object.fromEntries(Array.from({ length: 40 }, (_entry, index) => ['k' + index, 'v']))).length, 16);
 });
 
 test('lookupGnomeKeyring issues the documented secret-tool command', async () => {
@@ -50,6 +50,10 @@ test('lookupGnomeKeyring issues the documented secret-tool command', async () =>
   const result = await lookupGnomeKeyring(DEFAULT_GNOME_KEYRING_ATTRIBUTES, { execFile });
   assert.equal(result.value, STORED_KEY);
   assert.equal(result.source, 'gnome-keyring');
+  // The declared hit type carries `attempted`, so a direct hit must include it as
+  // an empty list rather than omitting the field: a consumer reading it must not
+  // have to distinguish "nothing was tried first" from "the field is missing".
+  assert.deepEqual(result.attempted, []);
   assert.deepEqual(execFile.calls, [{ file: 'secret-tool', args: ['lookup', 'service', 'dsh-web-search-brave'] }]);
 });
 
@@ -65,6 +69,7 @@ test('lookupPass issues the documented pass command and takes the first line', a
   const result = await lookupPass(DEFAULT_PASS_PATH, { execFile });
   assert.equal(result.value, STORED_KEY);
   assert.equal(result.source, 'pass');
+  assert.deepEqual(result.attempted, [], 'a direct hit reports an empty note list, not a missing field');
   assert.deepEqual(execFile.calls, [{ file: 'pass', args: ['show', 'dsh/brave-search-api'] }]);
 });
 
