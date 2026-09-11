@@ -117,3 +117,29 @@ test('the scanner exits non-zero and never prints the matched text', () => {
   assert.match(stdout, /check-secrets: clean/u);
   assert.match(stdout, new RegExp(`\\b${PATTERNS.length} patterns`, 'u'));
 });
+
+test('the test gate reports which tests failed, not only how many', async () => {
+  // A gate that prints a bare count hides the failing names inside a child
+  // process whose output is discarded, so a red CI job has to be reproduced
+  // locally before it can even be named. This is the parsing behind the fix.
+  const { failingTests } = await import('../scripts/check-test-gate.mjs');
+  const tap = [
+    'ok 1 - a passing test',
+    'not ok 2 - a failing test',
+    '  ---',
+    "  error: 'Expected values to be strictly deep-equal:'",
+    '  code: ERR_ASSERTION',
+    '  ...',
+    'ok 3 - another passing test',
+    'not ok 4 - a second failing test',
+    '  ---',
+    '  error: |-',
+    '    boom',
+    '  ...',
+  ].join('\n');
+  assert.deepEqual(failingTests(tap.split('\n')), [
+    { name: 'a failing test', diagnostic: "  error: 'Expected values to be strictly deep-equal:'\n  code: ERR_ASSERTION" },
+    { name: 'a second failing test', diagnostic: '  error: |-\n    boom' },
+  ]);
+  assert.deepEqual(failingTests(['ok 1 - fine']), []);
+});

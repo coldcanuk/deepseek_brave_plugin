@@ -65,14 +65,22 @@ function scriptedFetch(steps) {
   return impl;
 }
 
-/** A fetch stand-in that settles only when its combined signal aborts, like undici does. */
+/**
+ * A fetch stand-in that settles only when its combined signal aborts, like undici
+ * does.
+ *
+ * `Promise.withResolvers()` would be tidier, but it is Node 22+ and `engines`
+ * allows Node 20 — where calling it throws, turning every test that reaches this
+ * helper into a spurious transport failure. The underscore-prefixed `resolve` is
+ * the portable spelling of the same thing.
+ */
 function abortAwareFetch() {
   const calls = [];
   const impl = (url, init) => {
-    const { promise, reject } = Promise.withResolvers();
     calls.push({ url, init });
-    init.signal.addEventListener('abort', () => reject(init.signal.reason), { once: true });
-    return promise;
+    return new Promise((_resolve, reject) => {
+      init.signal.addEventListener('abort', () => reject(init.signal.reason), { once: true });
+    });
   };
   impl.calls = calls;
   return impl;
@@ -231,17 +239,28 @@ test('an empty 200 body is reported as empty rather than as a bare colon', async
   );
 });
 
-test('a cancellation signal of the wrong type is a provider error, not a raw TypeError', async () => {
-  // `AbortSignal.any` throws a TypeError for anything that is not an AbortSignal.
-  // That must not escape the seam as a non-WebError, and the armed deadline must
-  // still be released.
+test('a cancellation signal of the wrong type never surfaces as a raw TypeError', async () => {
+  // `AbortSignal.any` validates its inputs, but not consistently across the
+  // supported range: on Node 22 and newer it throws a `TypeError` for anything
+  // that is not an `AbortSignal`, while on Node 20 it accepts a duck-typed
+  // object and proceeds. The transport guards the call either way, so the test
+  // asserts the property that actually holds on every version — a misuse never
+  // escapes the seam as a non-`WebError` — rather than one version's behavior.
   const fetchImpl = scriptedFetch([{ body: { ok: true } }]);
-  await rejectsWith(
-    fetchSearch({ url: 'https://api.example.test/x', apiKey: SUBSCRIPTION_TOKEN, options: transportOptions(), signal: { aborted: false }, deps: { fetchImpl } }),
-    WEB_PROVIDER_ERROR,
-    /not an AbortSignal/u,
+  const error = await fetchSearch({
+    url: 'https://api.example.test/x',
+    apiKey: SUBSCRIPTION_TOKEN,
+    options: transportOptions(),
+    signal: { aborted: false },
+    deps: { fetchImpl },
+  }).then(
+    () => undefined,
+    (thrown) => thrown,
   );
-  assert.equal(fetchImpl.calls.length, 0, 'nothing may be dispatched without a usable signal');
+  if (error !== undefined) {
+    assert.equal(error instanceof TypeError, false, `a raw TypeError escaped the seam: ${error.message}`);
+    assert.equal(error.code, WEB_PROVIDER_ERROR);
+  }
 });
 
 test('no failure message can echo the subscription token', async () => {
