@@ -5,7 +5,7 @@
 
 version: 2
 updates:
-  - package-ecosystem: "" # See documentation for possible values
+  - package-ecosystem: "npm" # the root package.json / package-lock.json
     directory: "/" # Location of package manifests
     schedule:
       interval: "weekly"
