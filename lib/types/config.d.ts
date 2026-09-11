@@ -76,8 +76,12 @@ export declare const MAX_MAX_ATTEMPTS = 10;
 export declare const DEFAULT_MAX_ATTEMPTS = 3;
 /** Default exponential-backoff base, in milliseconds. */
 export declare const DEFAULT_RETRY_BASE_MS = 250;
+/** Largest accepted backoff base; the client shortens every delay to its own 30 s ceiling. */
+export declare const MAX_RETRY_BASE_MS = 30000;
 /** Default minimum spacing between dispatched searches; 0 disables the throttle. */
 export declare const DEFAULT_MIN_INTERVAL_MS = 0;
+/** Largest accepted spacing between dispatched searches, matching the longest honored `Retry-After`. */
+export declare const MAX_MIN_INTERVAL_MS = 60000;
 /** Attribution header sent on every request. */
 export declare const USER_AGENT = "dsh-web-search-brave/1.0.0";
 
@@ -205,8 +209,20 @@ export declare function nonEmptyString(value: unknown): string | undefined;
 /** Return the candidate when it is one of `allowed`, else the fallback. */
 export declare function oneOf<T extends string>(value: unknown, allowed: readonly T[], fallback: T): T;
 export declare function oneOf<T extends string>(value: unknown, allowed: readonly T[], fallback: undefined): T | undefined;
-/** Brand the configured credential reference, falling back when the name is unusable. */
-export declare function credentialReferenceOr(value: unknown, fallback: string): CredentialRef;
+/**
+ * Decide which credential reference to use. Reports a configured name that had to
+ * be rejected, so the rejection can be explained in the missing-credential message.
+ */
+export declare function credentialReferenceOr(value: unknown, fallback: string): {
+    reference: CredentialRef;
+    rejected: string | undefined;
+};
+/**
+ * Normalize a configured API base, accepting only an absolute http(s) URL with no
+ * credentials, query string, or fragment. Returns `undefined` when neither
+ * candidate is usable, so the caller decides between the default and refusing.
+ */
+export declare function normalizedBaseUrl(value: unknown, environmentValue: unknown): string | undefined;
 /** Project one authoritative config section into the options the provider serves its next search with. */
 export declare function resolveOptions(ctx: Context, config: Config | undefined, deps?: {
     execFile?: SecretExecFile;

@@ -13,6 +13,11 @@ export declare const MAX_RETRY_AFTER_MS = 60000;
 export declare const MAX_RETRY_DELAY_MS = 30000;
 /** Longest Brave error detail copied into a message. */
 export declare const MAX_ERROR_DETAIL_LENGTH = 300;
+/**
+ * Header carrying the subscription token; the one and only place the key leaves
+ * this plugin.
+ */
+export declare const SUBSCRIPTION_TOKEN_HEADER = "x-subscription-token";
 
 /** One request's endpoint and non-secret parameters. */
 export interface BraveQuery {
@@ -52,6 +57,23 @@ export declare function isRetryableStatus(status: number): boolean;
 export declare function isRedirectError(error: unknown): boolean;
 /** Sleep, honoring cancellation. */
 export declare function sleepMs(ms: number, signal?: AbortSignal): Promise<void>;
+
+/** One attempt's deadline: its signal, a timeout predicate, and a disposer. */
+export interface AttemptDeadline {
+    /** Signal that aborts when the deadline elapses. */
+    readonly signal: AbortSignal;
+    /** Whether this deadline is what aborted the attempt. */
+    didTimeOut(): boolean;
+    /** Clear the underlying timer; safe to call more than once. */
+    dispose(): void;
+}
+/**
+ * Start one attempt's deadline on a referenced timer, so an attempt whose
+ * transport holds no handle of its own still keeps the process alive until the
+ * timeout fires. Call `dispose()` once the attempt settles.
+ */
+export declare function attemptTimeout(timeoutMs: number): AttemptDeadline;
+
 /** Serializes dispatch through a promise chain and enforces a minimum interval. */
 export declare class RequestThrottle {
     constructor(options?: {

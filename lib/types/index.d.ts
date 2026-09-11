@@ -11,8 +11,12 @@ import type { Config } from './config.js';
 export declare const name = "web-search-brave";
 /** The web seam this provider registers into. */
 export declare const inject: string[];
-/** Register the Brave search provider with `ctx.web` and install the settings section when settings are present. */
-export declare function apply(ctx: Context, config: Config): void;
+/**
+ * Register the Brave search provider with `ctx.web` and install the settings
+ * section when settings are present. `config` is optional because the loader may
+ * compose the plugin with no entry; every field then takes its own default.
+ */
+export declare function apply(ctx: Context, config?: Config): void;
 
 export { Config, PROVIDER_ID, SETTINGS_NAMESPACE, resolveOptions } from './config.js';
 export { BASE_URL_ENV, CONTEXT_THRESHOLD_MODES, DEFAULT_API_KEY_ENV, DEFAULT_BASE_URL, DEFAULT_COUNTRY, DEFAULT_COUNT, DEFAULT_MAX_ATTEMPTS, DEFAULT_MAX_TOKENS, DEFAULT_MIN_INTERVAL_MS, DEFAULT_MODE, DEFAULT_RETRY_BASE_MS, DEFAULT_SEARCH_LANG, DEFAULT_TIMEOUT_MS, LLM_CONTEXT_PATH, MAX_COUNT_LLM_CONTEXT, MAX_COUNT_WEB_SEARCH, MAX_MAX_TOKENS, MIN_MAX_TOKENS, MODES, MODE_LLM_CONTEXT, MODE_WEB_SEARCH, SAFESEARCH_VALUES, SEARCH_REQUEST_EVENT, WEB_SEARCH_PATH, effectiveCount, maxCountForMode, } from './config.js';
@@ -22,3 +26,5 @@ export type { BraveProviderDependencies } from './provider.js';
 export { DEFAULT_GNOME_KEYRING_ATTRIBUTES, DEFAULT_PASS_PATH, GNOME_SECRET_TOOL, PASS_TOOL, SECRET_LOOKUP_TIMEOUT_MS, SECRET_MANAGER_AUTO, SECRET_MANAGER_GNOME, SECRET_MANAGER_NONE, SECRET_MANAGER_PASS, SECRET_MANAGERS, firstLine, lookupGnomeKeyring, lookupPass, resolveSecret, secretAttributes, } from './secrets.js';
 export type { SecretExecFile, SecretLookupHit, SecretLookupMiss, SecretLookupOptions, SecretLookupResult, SecretManager } from './secrets.js';
 export { WEB_ABORTED, WEB_PROVIDER_CREDENTIAL_MISSING, WEB_PROVIDER_ERROR } from './errors.js';
+export { attemptTimeout } from './client.js';
+export type { AttemptDeadline } from './client.js';
