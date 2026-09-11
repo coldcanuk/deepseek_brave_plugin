@@ -100,15 +100,22 @@ secret-tool lookup service dsh-web-search-brave     # what the plugin runs
 ```
 
 `secret-tool store` prompts for the secret itself, so it never reaches shell history or a process
-list. To point at an item you already have instead, name its attributes in
-`gnomeKeyringAttributes` — for example a GNOME Passwords note:
+list, and it creates a *password* item: the secret is the item's payload, not one of its attributes.
+
+Create it that way rather than as a GNOME Passwords **note**. A note keeps its content in an
+attribute named `secret`, and `secret-tool search` prints every attribute it finds — so
+`secret-tool search --all` can print a note's contents in the clear to any process running as you,
+and a "metadata only" inspection is not metadata only. The plugin never lists the collection; it
+performs one `lookup` for the item it is configured for.
+
+To point at an existing *password* item instead, name its attributes in `gnomeKeyringAttributes`:
 
 ```json
-{ "gnomeKeyringAttributes": { "xdg:schema": "org.gnome.keyring.Note", "Title": "Brave Search API Paid" } }
+{ "gnomeKeyringAttributes": { "service": "brave-search-api", "account": "me" } }
 ```
 
-Run `secret-tool search --all --unlock` in your desktop session to see the attribute names an item
-actually carries.
+Inspect a *password* item's attribute names with `secret-tool search --all <attribute> <value>` in
+your desktop session; do not run it against notes.
 
 **pass** — entry `dsh/brave-search-api`:
 
