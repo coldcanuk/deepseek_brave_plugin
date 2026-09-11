@@ -12,6 +12,10 @@ model-facing `web_search` tool is answered by Brave instead of by the harness's 
   (GNOME keyring or `pass`), or the launch environment, and travels only in the
   `X-Subscription-Token` request header.
 
+**Search terms:** brave search plugin for deepseek harness · dsh web_search provider · deepseek
+harness brave search api · brave llm context api · cordis web search plugin · gnome keyring brave
+api key
+
 ---
 
 ## Why two modes
