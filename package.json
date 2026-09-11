@@ -60,7 +60,9 @@
     "test": "node scripts/check-test-gate.mjs",
     "test:raw": "node --test",
     "check:test-gate": "node scripts/check-test-gate.mjs",
-    "check:secrets": "node scripts/check-secrets.mjs"
+    "check:secrets": "node scripts/check-secrets.mjs",
+    "check:lint": "biome lint --error-on-warnings .",
+    "check": "npm run check:secrets && npm run check:lint && npm test"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.2",
