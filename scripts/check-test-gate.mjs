@@ -31,7 +31,7 @@ const run = promisify(execFile);
 
 /**
  * Fewest tests that must execute for the gate to mean anything. The suite
- * carries 161 at the time of writing; the floor exists to catch a vacuous run,
+ * carries 168 at the time of writing; the floor exists to catch a vacuous run,
  * not to track additions, so it sits well below the real count and does not
  * need editing every time a test is added.
  */
@@ -97,7 +97,7 @@ const MAX_FAILURE_EXCERPT_LINES = 25;
  */
 export function failingTests(lines) {
   const failures = [];
-  let current = undefined;
+  let current;
   let inDiagnostic = false;
   for (const line of lines) {
     const header = /^not ok \d+ - (.*)$/u.exec(line);
