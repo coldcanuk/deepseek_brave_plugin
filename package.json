@@ -57,7 +57,9 @@
     }
   },
   "scripts": {
-    "test": "node --test \"test/**/*.test.js\"",
+    "test": "node scripts/check-test-gate.mjs",
+    "test:raw": "node --test",
+    "check:test-gate": "node scripts/check-test-gate.mjs",
     "check:secrets": "node scripts/check-secrets.mjs"
   },
   "peerDependencies": {
@@ -69,5 +71,10 @@
   },
   "dependencies": {
     "@deepseek-ai/schemastery": "^3.18.2"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.5.13",
+    "@types/node": "22.20.2",
+    "typescript": "7.0.2"
   }
 }
