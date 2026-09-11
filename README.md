@@ -8,8 +8,9 @@ model-facing `web_search` tool is answered by Brave instead of by the harness's 
   what runs.
 - **No runtime dependencies** beyond `@deepseek-ai/schemastery`; everything else is a peer.
 - **No key material in this repository, ever.** Configuration carries a credential *reference*;
-  the value is resolved once per search from the harness credential service or the launch
-  environment and travels only in the `X-Subscription-Token` request header.
+  the value is resolved once per search from the harness credential store, a password manager
+  (GNOME keyring or `pass`), or the launch environment, and travels only in the
+  `X-Subscription-Token` request header.
 
 ---
 
@@ -28,47 +29,118 @@ the tool contract.
 
 ## Requirements
 
-- Node.js **20.3 or newer** (`engines` declares `>=20`; the 20.3 floor is `AbortSignal.any`, used
-  to combine the caller's cancellation with the per-attempt timeout).
-- A harness that provides `@deepseek-ai/dsh-web`, `@deepseek-ai/dsh-credentials`,
-  `@deepseek-ai/dsh-launch-environment`, `@deepseek-ai/dsh-settings`, and `@deepseek-ai/cordis`
-  (declared as peer dependencies).
-- A Brave Search API subscription key with access to the endpoint you choose. Both modes are on
-  the same "Search" plan and use the same key.
+- A DeepSeek Harness with its `dsh` CLI; the examples use the built-in `web` profile. The harness
+  supplies the peer packages this plugin declares (`@deepseek-ai/dsh-web`,
+  `@deepseek-ai/dsh-credentials`, `@deepseek-ai/dsh-launch-environment`, `@deepseek-ai/dsh-settings`,
+  `@deepseek-ai/cordis`).
+- Node.js **20.3 or newer** for the process that runs the harness (`engines` declares `>=20`; the
+  20.3 floor is `AbortSignal.any`, used to combine the caller's cancellation with the per-attempt
+  timeout).
+- A **Brave Search API key** on the "Search" plan. Both modes use it, and the free tier is enough to
+  try it.
+- Optional, recommended: the GNOME keyring (`secret-tool`) or `pass`, so the key never sits in a
+  cleartext file.
 
 ## Install
 
-> **Do not install the bare name.** `dsh-web-search-brave` is taken on npm by an unrelated
-> third-party package (currently 0.2.3, another author, MIT) whose harness peers are pinned to
-> `^0.0.1-rc.*`. `npm install dsh-web-search-brave` fetches *that* package, not this one, and then
-> fails to resolve against a current harness. This plugin's package name is scoped:
-> **`@coldcanuk/dsh-web-search-brave`**.
+Four steps, and nothing else is required.
 
-Install from this repository, by git URL or by path:
+**1. Add the plugin to your harness profile.**
 
 ```sh
-npm install github:coldcanuk/deepseek_brave_plugin
-# or, from a local clone:
-npm install /path/to/deepseek_brave_plugin
+dsh plugin --profile web add github:coldcanuk/deepseek_brave_plugin
 ```
 
-Inside a harness profile, name it in the profile's `dependencies` (see
-[Adding it to a harness profile](#adding-it-to-a-harness-profile)):
+That forwards `add` to the profile's package manager and appends the package to
+`dsh.profile.bundles`, because the package declares `dsh.bundle.patch`. Its own
+`cordis.patch.yml` then registers the provider and points the `web` seam at `brave-official` — so
+there is **no patch file to edit and no configuration to write**; every option has a default. (What
+that layer contains: [How the install composes](#how-the-install-composes).)
 
-```json
-{
-  "dependencies": {
-    "@coldcanuk/dsh-web-search-brave": "github:coldcanuk/deepseek_brave_plugin"
-  }
-}
+Hand-editing the profile's `package.json` is not enough on its own: it is this command that
+reconciles `dsh.profile.bundles`, so a plain install would fetch the package without composing it.
+
+Not on your `PATH`? See [If `dsh` is not on your PATH](#if-dsh-is-not-on-your-path).
+
+**2. Restart the harness.** Module code loads at boot, and the shipped base layer disables HMR.
+Sessions persist, so an open conversation survives the restart.
+
+**3. Give it a key.** The first option is recommended: the key stays encrypted at rest and never
+touches a file.
+
+```sh
+secret-tool store --label='Brave Search API (dsh-web-search-brave)' service dsh-web-search-brave
 ```
 
-Inside this repository, plain `npm install` is all you need: it installs the peer packages and the
-single runtime dependency. Nothing here consumes the plugin by name, so do not run the bare-name
-install in this directory — it would add the unrelated registry package to this manifest.
+It prompts for the value. `pass insert dsh/brave-search-api` works just as well, and so do the
+settings page (Settings → Plugins → Plugin configuration → Web search) and, as a cleartext last
+resort, an exported `BRAVE_SEARCH_API_KEY` or a line in `~/.dsh/.env`. Precedence and details:
+[Credentials](#credentials).
 
-The package ships `lib/` and its `cordis.patch.yml` bundle layer; there is nothing to compile
-and no postinstall step.
+Because the key is resolved once per search, a key stored after step 2 takes effect on the next
+search — no further restart.
+
+**4. Verify.** Run any `web_search`. Success returns Brave sources. To check the composition
+without booting anything:
+
+```sh
+dsh --profile web --dump-config > /dev/null && echo "composition ok"
+```
+
+If the key is not reaching the plugin, the search fails with
+`WEB_PROVIDER_CREDENTIAL_MISSING`, whose message lists every source that was tried.
+
+### If `dsh` is not on your PATH
+
+Expected when the harness was started with `npx @deepseek-ai/dsh …`: npx installs the CLI into its
+own cache and prepends that cache's `.bin` to the process it launches, so nothing lands in your
+shell PATH or in the global npm bin. Run the same command through npx, pinned to the version you are
+running, or call the cached binary directly:
+
+```sh
+npx @deepseek-ai/dsh@0.1.5-rc.1 plugin --profile web add github:coldcanuk/deepseek_brave_plugin
+~/.npm/_npx/*/node_modules/.bin/dsh plugin --profile web add github:coldcanuk/deepseek_brave_plugin
+```
+
+Do not install the `dsh` package your distribution offers (`apt install dsh`): that is an
+unrelated program, not this harness.
+
+### Updating and removing
+
+```sh
+dsh plugin --profile web update @coldcanuk/dsh-web-search-brave   # move the git pin to the current commit
+dsh plugin --profile web remove @coldcanuk/dsh-web-search-brave   # uninstall; the web seam reverts to its shipped default
+```
+
+Use `update`, not a second `add`: pnpm skips resolution when the spec string is unchanged, so a
+repeated `add` keeps the old commit. Both commands reconcile the bundle list on the same run.
+
+### Other install routes
+
+Inside this repository, plain `npm install` installs the peer packages and the one runtime
+dependency; nothing here consumes the plugin by name:
+
+```sh
+npm install
+npm test               # 117 tests, no key and no network required
+npm run check:secrets  # the credential scan (see SECURITY.md)
+```
+
+From a local clone, useful while developing a change — a path works anywhere a git spec does:
+
+```sh
+dsh plugin --profile web add /path/to/deepseek_brave_plugin   # into your profile
+npm install /path/to/deepseek_brave_plugin                    # or into another project
+```
+
+> **Never install the bare npm name.** On the registry, `dsh-web-search-brave` is an unrelated
+> third-party package (0.2.3, another author, MIT) whose harness peers are pinned to `^0.0.1-rc.*`.
+> `npm install dsh-web-search-brave` fetches *that* package and then fails to resolve against a
+> current harness. This plugin's package name is scoped: **`@coldcanuk/dsh-web-search-brave`**, and
+> it is installed from this repository by git URL or path.
+
+Both routes ship `lib/` and the `cordis.patch.yml` bundle layer; there is nothing to compile and
+no postinstall step.
 
 ## Credentials
 
@@ -133,9 +205,10 @@ go through `execFile` with no shell, and no tool output is ever logged or embedd
 ### Without a password manager
 
 The settings page (Settings → Plugins → Plugin configuration → Web search) stores the value in the
-harness credential store: the intended route, and it needs no restart. The cleartext fallbacks are
-an exported variable in the launching environment, or a line in `~/.dsh/.env` (`chmod 600`), which
-sits outside every repository:
+harness credential store: the intended route, and it needs no restart. Its `apiKeyEnv` field names
+the credential and never holds the key itself — a key typed there is stored nowhere, and the failure
+says so. The cleartext fallbacks are an exported variable in the launching environment, or a line in
+`~/.dsh/.env` (`chmod 600`), which sits outside every repository:
 
 ```sh
 export BRAVE_SEARCH_API_KEY=...   # your shell, never a repository file
@@ -280,75 +353,17 @@ event:
 
 No headers, and no key. Recording is inert when no agent session is attached.
 
-## Adding it to a harness profile
+## How the install composes
 
-A profile lives at `~/.dsh/profiles/<name>` (the built-in web profile is `web`) and is composed
-from an ordered stack of bundle patch layers under the profile's own overrides. This package
-declares `dsh.bundle.patch`, which makes it a **bundle**: it installs itself and configures
-itself.
+A profile lives at `~/.dsh/profiles/<name>` (the built-in web profile is `web`) and is composed from
+an ordered stack of bundle patch layers under the profile's own overrides. Because this package
+declares `dsh.bundle.patch`, the single `add` in [Install](#install) makes its `cordis.patch.yml`
+one of those layers — applied after the shipped bundles and before your profile's own
+`cordis.patch.yml`, which therefore always wins. Removing the dependency removes the layer again.
 
-**1. Install it.** One command:
-
-```sh
-dsh plugin --profile web add github:coldcanuk/deepseek_brave_plugin
-```
-
-That forwards `add` to pnpm in the profile directory and then reconciles the profile's
-`dsh.profile.bundles`: a dependency whose manifest declares `dsh.bundle` joins the layer stack.
-This package's own `cordis.patch.yml` is therefore applied on the next boot — it registers the
-provider and points the `web` seam at `brave-official` — and there is no patch file to edit.
-
-To move a git-pinned install to a newer revision, use `update` rather than a second `add`: pnpm
-skips resolution when the spec string is unchanged, so a repeated `add` keeps the old commit.
-`dsh plugin --profile web update @coldcanuk/dsh-web-search-brave` re-resolves the pin and
-reconciles the bundle list on the same run.
-
-If `dsh` is not on your PATH, that is expected when the harness was started with
-`npx @deepseek-ai/dsh …`: npx installs the CLI into its own cache and prepends that cache's
-`.bin` to the process it launches, so nothing lands in your shell PATH or in the global npm bin.
-Run the same command through npx, pinned to the version you are running, or call the cached binary
-directly:
-
-```sh
-npx @deepseek-ai/dsh@0.1.5-rc.1 plugin --profile web add github:coldcanuk/deepseek_brave_plugin
-~/.npm/_npx/*/node_modules/.bin/dsh plugin --profile web add github:coldcanuk/deepseek_brave_plugin
-```
-
-Do not install the `dsh` package your distribution offers (`apt install dsh`): that is an
-unrelated program, not this harness. Install this plugin by git URL or path, never by the bare
-name: the registry's `dsh-web-search-brave` is a different package (see [Install](#install)). The
-profile's package manager is already configured for out-of-tree plugins
-(`nodeLinker: hoisted`, `autoInstallPeers: false`), so the `@deepseek-ai/*` peers are not
-duplicated into the profile: the plugin binds to the running installation's own copies.
-
-**2. Supply the key once.** The configuration section is registered at install time, so this is a
-prompt, not a file edit. Best first, because it keeps the key encrypted at rest:
-
-- **A password manager.** Store the key once and the plugin reads it from there:
-
-  ```sh
-  secret-tool store --label='Brave Search API (dsh-web-search-brave)' service dsh-web-search-brave
-  pass insert dsh/brave-search-api
-  ```
-
-  Both prompt for the value; neither needs a file. See
-  [Password managers](#password-managers-recommended-no-cleartext-key-on-disk) for pointing at an
-  entry you already have.
-- **Settings → Plugins → Plugin configuration → Web search** (the `web-search-brave` section).
-  The `apiKeyEnv` row is a credential reference; the page stores the value through the harness
-  credential store and can replace or clear it later.
-- **`~/.dsh/.env`** (`chmod 600`) or an exported `BRAVE_SEARCH_API_KEY`, if you accept a cleartext
-  copy.
-
-If a search then fails with `WEB_PROVIDER_CREDENTIAL_MISSING`, the value never reached the
-plugin. The usual cause is typing the key into the `apiKeyEnv` field: that field holds the
-credential's *name* (`BRAVE_SEARCH_API_KEY`), not the key itself, so a key typed there is stored
-nowhere. Set the value *behind* the reference instead — the settings route needs no restart,
-because the key is resolved once per search.
-
-**3. Restart the harness.** A profile's patch layer is live-reloaded, but a newly installed
-dependency is picked up at boot. A missing key surfaces on the first search as
-`WEB_PROVIDER_CREDENTIAL_MISSING` naming the reference — it never silently returns nothing.
+The profile's package manager is already configured for out-of-tree plugins
+(`nodeLinker: hoisted`, `autoInstallPeers: false`), so the `@deepseek-ai/*` peers are not duplicated
+into the profile: the plugin binds to the running installation's own copies.
 
 ### What the bundled layer sets
 
