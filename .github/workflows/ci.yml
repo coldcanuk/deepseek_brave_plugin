@@ -61,3 +61,9 @@ jobs:
 
       - name: Type-check the declarations
         run: npm run check:types:tsc
+
+      # Gate coverage, not just report it: the thresholds sit a few points under
+      # the current baseline, so they catch a new untested path without failing
+      # on ordinary churn.
+      - name: Enforce coverage floors
+        run: npm run check:coverage

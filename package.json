@@ -59,12 +59,14 @@
   "scripts": {
     "test": "node scripts/check-test-gate.mjs",
     "test:raw": "node --test",
+    "test:coverage": "node --test --experimental-test-coverage --test-coverage-include=lib/**",
+    "check:coverage": "node --test --experimental-test-coverage --test-coverage-include=lib/** --test-coverage-lines=95 --test-coverage-branches=88 --test-coverage-functions=92",
     "check:test-gate": "node scripts/check-test-gate.mjs",
     "check:secrets": "node scripts/check-secrets.mjs",
     "check:types": "node scripts/check-types.mjs",
     "check:types:tsc": "tsc --project tsconfig.json",
     "check:lint": "biome lint --error-on-warnings .",
-    "check": "npm run check:secrets && npm run check:lint && npm run check:types && npm run check:types:tsc && npm test"
+    "check": "npm run check:secrets && npm run check:lint && npm run check:types && npm run check:types:tsc && npm test && npm run check:coverage"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.2",
