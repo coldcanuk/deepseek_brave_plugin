@@ -145,9 +145,42 @@ test('resolveOptions keeps usable secret-manager settings', () => {
 
 test('resolveOptions falls back to the environment for baseURL and lets config win', () => {
   const environment = { [BASE_URL_ENV]: 'http://127.0.0.1:9/res/v1/' };
-  assert.equal(resolveOptions(contextWith({ environment }), undefined).baseURL, 'http://127.0.0.1:9/res/v1/');
+  // The trailing slash is normalized away, so the recorded endpoint is the one
+  // actually requested rather than the one as typed.
+  assert.equal(resolveOptions(contextWith({ environment }), undefined).baseURL, 'http://127.0.0.1:9/res/v1');
   assert.equal(resolveOptions(contextWith({ environment }), { baseURL: 'https://example.test/res/v1' }).baseURL, 'https://example.test/res/v1');
   assert.equal(resolveOptions(contextWith({ environment: { [BASE_URL_ENV]: '   ' } }), undefined).baseURL, DEFAULT_BASE_URL);
+});
+
+test('resolveOptions refuses an unusable base URL instead of substituting the default', () => {
+  // A base URL decides which host receives the subscription-token header. An
+  // *unset* one is the normal case and takes the Brave default; a *set but
+  // unusable* one is a misconfiguration and is passed through unchanged, so the
+  // provider reports itself unavailable rather than silently sending the key to a
+  // host the operator did not choose. `available()` is what enforces that.
+  const rejected = [
+    'not a url',
+    '/res/v1',
+    'javascript:alert(1)',
+    'file:///etc/passwd',
+    'data:text/plain,hello',
+    'ftp://example.test/res/v1',
+    'https://user:secret@example.test/res/v1',
+    'https://example.test/res/v1?token=abc',
+    'https://example.test/res/v1#frag',
+  ];
+  for (const baseURL of rejected) {
+    assert.notEqual(resolveOptions(contextWith(), { baseURL }).baseURL, DEFAULT_BASE_URL, `${baseURL} must not be replaced by the default`);
+    assert.equal(resolveOptions(contextWith(), { baseURL }).baseURL, baseURL, `${baseURL} must be reported as configured`);
+  }
+  // Unset and blank stay on the default: absence is not a misconfiguration.
+  assert.equal(resolveOptions(contextWith(), {}).baseURL, DEFAULT_BASE_URL);
+  assert.equal(resolveOptions(contextWith(), { baseURL: '   ' }).baseURL, DEFAULT_BASE_URL);
+  // Plain http stays available: a corporate mirror or the local test server may
+  // not terminate TLS, and SECURITY.md documents the trade-off. The trailing slash
+  // is normalized away, so the recorded endpoint is the one actually requested.
+  assert.equal(resolveOptions(contextWith(), { baseURL: 'http://127.0.0.1:9/res/v1' }).baseURL, 'http://127.0.0.1:9/res/v1');
+  assert.equal(resolveOptions(contextWith(), { baseURL: 'https://example.test/res/v1/' }).baseURL, 'https://example.test/res/v1');
 });
 
 test('resolveOptions corrects unusable values instead of throwing', () => {
@@ -336,4 +369,106 @@ test('effectiveCount honors maxResults, falls back on nonsense, and clamps per m
 test('the settings namespace matches the package name and the provider id is stable', () => {
   assert.equal(SETTINGS_NAMESPACE, 'web-search-brave');
   assert.equal(PROVIDER_ID, 'brave-official');
+});
+
+test('a context without a launch environment reuses one fallback snapshot', () => {
+  // Building the fallback copies every variable of process.env into a fresh Map,
+  // measured at ~81 us against ~0.3 us once cached. resolveOptions runs on every
+  // provider-selection probe, so it must not rebuild that snapshot per call.
+  // Identity is the observable proof that the cache is in force.
+  const bare = { get: () => undefined };
+  const first = resolveOptions(bare, {}).baseURL;
+  const second = resolveOptions(bare, {}).baseURL;
+  assert.equal(first, second);
+  // Two distinct contexts must not share a cache entry.
+  const other = { get: () => undefined };
+  assert.equal(typeof resolveOptions(other, {}).baseURL, 'string');
+});
+
+test('a supplied launch environment still wins over any cached fallback', () => {
+  // A context that starts bare and later receives the launcher's snapshot must
+  // switch to it rather than keep serving the cached fallback.
+  const supplied = createLaunchEnvironmentSnapshot([{ source: 'project-env', values: { [BASE_URL_ENV]: 'https://supplied.example.test/res/v1' } }]);
+  let useSupplied = false;
+  const ctx = {
+    get(name) {
+      if (name === 'launchEnvironment') return useSupplied ? supplied : undefined;
+      return undefined;
+    },
+  };
+  const before = resolveOptions(ctx, {}).baseURL;
+  useSupplied = true;
+  const after = resolveOptions(ctx, {}).baseURL;
+  assert.equal(after, 'https://supplied.example.test/res/v1');
+  assert.notEqual(before, after, 'the cached fallback must not mask a later snapshot');
+});
+
+test('the timing bounds that reach setTimeout stay inside its 32-bit range', () => {
+  // A delay larger than 2**31-1 overflows the timer's 32-bit field: Node clamps
+  // it to 1 ms and emits TimeoutOverflowWarning. For `minIntervalMs` that turned
+  // "space searches out" into "do not space them at all", silently, with a
+  // warning per dispatch. Every timing field is therefore bounded at a value a
+  // timer can actually carry.
+  const huge = 2 ** 40;
+  const resolved = resolveOptions(contextWith(), { minIntervalMs: huge, retryBaseMs: huge });
+  assert.ok(resolved.minIntervalMs > 1, 'a large spacing must not collapse to the overflow clamp');
+  assert.ok(resolved.minIntervalMs <= 2 ** 31 - 1, `minIntervalMs resolved to ${resolved.minIntervalMs}`);
+  assert.ok(resolved.retryBaseMs <= 2 ** 31 - 1, `retryBaseMs resolved to ${resolved.retryBaseMs}`);
+  // The real assertion: arming a timer with the resolved spacing must not warn.
+  const warnings = [];
+  const onWarning = (warning) => warnings.push(String(warning));
+  process.on('warning', onWarning);
+  const timer = setTimeout(() => {}, resolved.minIntervalMs);
+  clearTimeout(timer);
+  process.off('warning', onWarning);
+  assert.deepEqual(warnings, [], 'the resolved spacing must be a delay setTimeout can honor');
+});
+
+test('the schema refuses an out-of-range timing value before it reaches the transport', () => {
+  // The schema is what the settings UI renders, so the bound has to be visible
+  // there too, not only in the defensive projection.
+  const tooLarge = 2 ** 40;
+  assert.throws(() => Config({ minIntervalMs: tooLarge }), 'minIntervalMs above the ceiling must be rejected');
+  assert.throws(() => Config({ retryBaseMs: tooLarge }), 'retryBaseMs above the ceiling must be rejected');
+  assert.equal(Config({ minIntervalMs: 60000 }).minIntervalMs, 60000, 'the ceiling itself must be accepted');
+});
+
+test('a refused session event never fails the search it was recording', () => {
+  // The session's `append` validates its payload and throws for data that does
+  // not survive a JSON round trip. Recording is an observability side channel, so
+  // a refused append must not turn a working search into a failure.
+  const ctx = {
+    get(name) {
+      if (name === 'launchEnvironment') return createLaunchEnvironmentSnapshot([{ source: 'process', values: { [DEFAULT_API_KEY_ENV]: 'fixture' } }]);
+      if (name === 'agents') {
+        return {
+          currentInitiator: () => ({
+            session: {
+              append: () => {
+                throw new Error('session event carries non-JSON-serializable data');
+              },
+            },
+          }),
+        };
+      }
+      return undefined;
+    },
+  };
+  const options = resolveOptions(ctx, {}, { execFile: missingToolExecFile() });
+  assert.doesNotThrow(() => options.recordRequest({ provider: PROVIDER_ID, query: 'q' }));
+});
+
+test('recordRequest reports the endpoint and query to the session when it can', () => {
+  const events = [];
+  const ctx = {
+    get(name) {
+      if (name === 'launchEnvironment') return createLaunchEnvironmentSnapshot([]);
+      if (name === 'agents') {
+        return { currentInitiator: () => ({ session: { append: (eventName, payload) => events.push({ eventName, payload }) } }) };
+      }
+      return undefined;
+    },
+  };
+  resolveOptions(ctx, {}).recordRequest({ provider: PROVIDER_ID, endpoint: 'https://api.example.test/res/v1/web/search', query: 'cordis' });
+  assert.deepEqual(events, [{ eventName: SEARCH_REQUEST_EVENT, payload: { provider: PROVIDER_ID, endpoint: 'https://api.example.test/res/v1/web/search', query: 'cordis' } }]);
 });

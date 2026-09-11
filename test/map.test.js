@@ -82,15 +82,20 @@ test('llm-context treats an empty grounding list as a legitimate empty answer', 
   assert.deepEqual(mapLlmContextResponse(llmContextBody()), { sources: [], truncated: false });
   assert.deepEqual(mapLlmContextResponse(llmContextBody({ generic: [] })), { sources: [], truncated: false });
   assert.deepEqual(mapLlmContextResponse({ grounding: {} }), { sources: [], truncated: false });
-  assert.deepEqual(mapLlmContextResponse({ sources: {} }), { sources: [], truncated: false });
+  // The `sources` index is supplementary, so it may be absent or unusable on its
+  // own without affecting an otherwise valid envelope.
+  assert.deepEqual(mapLlmContextResponse({ grounding: {}, sources: {} }), { sources: [], truncated: false });
 });
 
 test('llm-context rejects a body that is not an LLM Context payload', () => {
   throwsProviderError(() => mapLlmContextResponse(null), /not a JSON object \(received null\)/u);
   throwsProviderError(() => mapLlmContextResponse('{}'), /not a JSON object \(received a string\)/u);
   throwsProviderError(() => mapLlmContextResponse([]), /not a JSON object \(received an array\)/u);
-  throwsProviderError(() => mapLlmContextResponse({ web: { results: [] } }), /neither a "grounding" nor a "sources" envelope/u);
-  throwsProviderError(() => mapLlmContextResponse({}), /neither a "grounding" nor a "sources" envelope/u);
+  throwsProviderError(() => mapLlmContextResponse({ web: { results: [] } }), /no "grounding" envelope/u);
+  throwsProviderError(() => mapLlmContextResponse({}), /no "grounding" envelope/u);
+  // A stray `sources` key is not an envelope. Accepting it made an unrelated JSON
+  // body look like a legitimate empty answer instead of the wrong shape it is.
+  throwsProviderError(() => mapLlmContextResponse({ sources: {} }), /no "grounding" envelope/u);
 });
 
 test('llm-context rejects a recognized envelope with the wrong inner shape', () => {
@@ -118,9 +123,11 @@ test('web-search maps url, title, description, and page_age', () => {
 });
 
 test('web-search treats an absent result list as a legitimate empty answer', () => {
+  // `web` is the envelope: present but empty means "no results", which is a real
+  // answer. A body without it is not a Web Search payload at all.
   assert.deepEqual(mapWebSearchResponse(webSearchBody()), { sources: [], truncated: false });
   assert.deepEqual(mapWebSearchResponse({ web: {} }), { sources: [], truncated: false });
-  assert.deepEqual(mapWebSearchResponse({ query: { original: 'nothing' } }), { sources: [], truncated: false });
+  assert.deepEqual(mapWebSearchResponse({ web: { results: [] } }), { sources: [], truncated: false });
 });
 
 test('web-search dedupes by URL and skips unusable entries', () => {
@@ -140,8 +147,11 @@ test('web-search dedupes by URL and skips unusable entries', () => {
 
 test('web-search rejects a body that is not a Web Search payload', () => {
   throwsProviderError(() => mapWebSearchResponse(null), /not a JSON object/u);
-  throwsProviderError(() => mapWebSearchResponse({ grounding: { generic: [] } }), /neither a "web" nor a "query" envelope/u);
-  throwsProviderError(() => mapWebSearchResponse({}), /neither a "web" nor a "query" envelope/u);
+  throwsProviderError(() => mapWebSearchResponse({ grounding: { generic: [] } }), /no "web" envelope/u);
+  throwsProviderError(() => mapWebSearchResponse({}), /no "web" envelope/u);
+  // `query` accompanies a real response but does not identify one; on its own it
+  // is a stray key, not an envelope.
+  throwsProviderError(() => mapWebSearchResponse({ query: { original: 'nothing' } }), /no "web" envelope/u);
   throwsProviderError(() => mapWebSearchResponse({ web: 'results' }), /"web" field that was not an object/u);
   throwsProviderError(() => mapWebSearchResponse({ web: { results: {} } }), /"web.results" field that was not an array/u);
 });

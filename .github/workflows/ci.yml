@@ -1,0 +1,69 @@
+# Quality gate for every push and pull request.
+#
+# Dependabot opens dependency updates on its own, but nothing about a Dependabot
+# pull request proves the suite still passes or that no credential slipped in —
+# only this workflow does. It runs the same commands a contributor runs locally,
+# so a red check here is always reproducible with `npm ci && npm test`.
+name: CI
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+  workflow_dispatch:
+
+# One run per ref: a new push supersedes the run already in flight.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: node ${{ matrix.node }}
+    runs-on: ubuntu-latest
+    strategy:
+      # Every supported major is reported, even if a sibling fails: a Node 20-only
+      # break is exactly the kind of portability regression this matrix exists to
+      # catch, and a cancelled sibling would hide it.
+      fail-fast: false
+      matrix:
+        # The floor and the current LTS come from `engines`; the middle entry
+        # keeps a break within the supported range from slipping between them.
+        node: ["20", "22", "24"]
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      - name: Install Node ${{ matrix.node }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # The suite is hermetic: no network, no API key, no real secret-tool or pass.
+      - name: Run the test suite
+        run: npm test
+
+      - name: Scan for credentials
+        run: npm run check:secrets
+
+      - name: Lint
+        run: npm run check:lint
+
+      - name: Check declarations against the runtime exports
+        run: npm run check:types
+
+      - name: Type-check the declarations
+        run: npm run check:types:tsc
+
+      # Gate coverage, not just report it: the thresholds sit a few points under
+      # the current baseline, so they catch a new untested path without failing
+      # on ordinary churn.
+      - name: Enforce coverage floors
+        run: npm run check:coverage

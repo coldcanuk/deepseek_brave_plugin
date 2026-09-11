@@ -39,6 +39,17 @@ coverage/
 test-results/
 *.lcov
 
+# --- Tool output that is never source ----------------------------------------
+# A diagnostic tool's working directory: a generated report plus the scratch
+# copies a remediation pass makes. Useful on disk, never committed.
+.code-dr/
+.scratch/
+
+# Linked worktrees. `git worktree add` puts a whole second checkout here, so a
+# single un-ignored entry would add every file of it to `git status` — and to the
+# credential scan, which reads exactly what `git add -A` would publish.
+.worktrees/
+
 # --- Runtime junk ------------------------------------------------------------
 *.pid
 *.tsbuildinfo
@@ -71,4 +82,7 @@ desktop.ini
 #   package-lock.json    the lockfile is committed on purpose so an install is
 #                        reproducible; do not add it to this file.
 #   .env.example         placeholder names only, never a real value
+#   tsconfig.json        the no-emit config behind `npm run check:types:tsc`;
+#                        nothing is ever emitted, so no build output can leak
+#   .github/             the CI workflow and the Dependabot config
 # ============================================================================

@@ -33,6 +33,17 @@ export declare function searchAborted(signal?: AbortSignal, fallback?: unknown):
 /** Throw {@link searchAborted} when the caller already cancelled. */
 export declare function throwIfSearchAborted(signal?: AbortSignal): void;
 /** Build the `WEB_PROVIDER_CREDENTIAL_MISSING` failure naming the reference. */
-export declare function credentialMissingError(apiKeyEnv: unknown): WebError;
+export declare function credentialMissingError(apiKeyEnv: unknown, attempted?: readonly string[]): WebError;
+/**
+ * Whether a configured credential reference looks like a pasted key rather than
+ * the name of one: a known credential prefix, or a value that is not shaped like
+ * a reference name. A heuristic, used only to decide what may be echoed.
+ */
+export declare function looksLikePastedKey(value: unknown): boolean;
+/**
+ * Render a configured credential name for a diagnostic, substituting a
+ * placeholder when the value is plainly a key rather than a name.
+ */
+export declare function safeCredentialLabel(value: unknown): string;
 /** Race an asynchronous preflight against caller cancellation. */
 export declare function abortable<T>(operation: Promise<T>, signal?: AbortSignal): Promise<T>;
