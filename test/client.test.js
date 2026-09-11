@@ -68,11 +68,12 @@ function scriptedFetch(steps) {
 /** A fetch stand-in that settles only when its combined signal aborts, like undici does. */
 function abortAwareFetch() {
   const calls = [];
-  const impl = (url, init) =>
-    new Promise((resolve, reject) => {
-      calls.push({ url, init });
-      init.signal.addEventListener('abort', () => reject(init.signal.reason), { once: true });
-    });
+  const impl = (url, init) => {
+    const { promise, reject } = Promise.withResolvers();
+    calls.push({ url, init });
+    init.signal.addEventListener('abort', () => reject(init.signal.reason), { once: true });
+    return promise;
+  };
   impl.calls = calls;
   return impl;
 }
@@ -166,6 +167,7 @@ test('parseRetryAfter accepts seconds, HTTP dates, and rejects nonsense', () => 
   assert.equal(parseRetryAfter('0'), 0);
   assert.equal(parseRetryAfter('9999'), MAX_RETRY_AFTER_MS);
   assert.equal(parseRetryAfter('Wed, 01 Jan 2026 00:00:05 GMT', now), 5000);
+  // A date already in the past means "retry now", not "no guidance".
   assert.equal(parseRetryAfter('Wed, 01 Jan 2020 00:00:00 GMT', now), 0);
   assert.equal(parseRetryAfter('soon'), undefined);
   assert.equal(parseRetryAfter(''), undefined);
@@ -190,8 +192,77 @@ test('isRetryableStatus retries rate limits, request timeouts, and server faults
 test('isRedirectError recognizes the refusal that must not be retried', () => {
   assert.equal(isRedirectError(new TypeError('fetch failed', { cause: new Error('unexpected redirect') })), true);
   assert.equal(isRedirectError(new Error('redirect not allowed')), true);
+  assert.equal(isRedirectError(new TypeError('fetch failed', { cause: Object.assign(new Error('bad redirect'), { code: 'ERR_INVALID_REDIRECT' }) })), true);
   assert.equal(isRedirectError(new TypeError('fetch failed', { cause: new Error('connect ECONNREFUSED') })), false);
   assert.equal(isRedirectError(undefined), false);
+  // A transport failure for a host whose *name* contains "redirect" is not a
+  // refused redirect; a substring match used to misclassify it as permanent, so
+  // that search was never retried.
+  assert.equal(isRedirectError(new TypeError('fetch failed', { cause: new Error('getaddrinfo ENOTFOUND redirect.example.test') })), false);
+  assert.equal(isRedirectError(new Error('the redirect proxy is unreachable')), false);
+});
+
+test('a non-JSON body with no usable detail does not leave a dangling colon', async () => {
+  // An unreadable or blank body must drop the detail clause entirely rather than
+  // render "HTTP 500: " with nothing after it.
+  const failure = new TypeError('fetch failed', { cause: new Error('socket closed') });
+  const response = {
+    ok: false,
+    status: 500,
+    headers: new Headers(),
+    text: async () => {
+      throw failure;
+    },
+  };
+  const error = await fetchSearch({ url: 'https://api.example.test/x', apiKey: SUBSCRIPTION_TOKEN, options: transportOptions({ maxAttempts: 1 }), deps: { fetchImpl: async () => response } }).then(
+    () => undefined,
+    (thrown) => thrown,
+  );
+  assert.match(error.message, /HTTP 500/u);
+  assert.equal(/\):\s*$/u.test(error.message), false, `the message must not end in a bare colon: ${error.message}`);
+});
+
+test('an empty 200 body is reported as empty rather than as a bare colon', async () => {
+  const fetchImpl = scriptedFetch([{ status: 200, text: '' }]);
+  await rejectsWith(
+    fetchSearch({ url: 'https://api.example.test/x', apiKey: SUBSCRIPTION_TOKEN, options: transportOptions({ maxAttempts: 1 }), deps: { fetchImpl } }),
+    WEB_PROVIDER_ERROR,
+    /HTTP 200\) \(the body was empty\)/u,
+  );
+});
+
+test('a cancellation signal of the wrong type is a provider error, not a raw TypeError', async () => {
+  // `AbortSignal.any` throws a TypeError for anything that is not an AbortSignal.
+  // That must not escape the seam as a non-WebError, and the armed deadline must
+  // still be released.
+  const fetchImpl = scriptedFetch([{ body: { ok: true } }]);
+  await rejectsWith(
+    fetchSearch({ url: 'https://api.example.test/x', apiKey: SUBSCRIPTION_TOKEN, options: transportOptions(), signal: { aborted: false }, deps: { fetchImpl } }),
+    WEB_PROVIDER_ERROR,
+    /not an AbortSignal/u,
+  );
+  assert.equal(fetchImpl.calls.length, 0, 'nothing may be dispatched without a usable signal');
+});
+
+test('no failure message can echo the subscription token', async () => {
+  const fetchImpl = scriptedFetch([{ status: 401, body: { error: { detail: 'rejected token ' + SUBSCRIPTION_TOKEN } } }]);
+  const error = await fetchSearch({ url: 'https://api.example.test/x', apiKey: SUBSCRIPTION_TOKEN, options: transportOptions(), deps: { fetchImpl } }).then(
+    () => undefined,
+    (thrown) => thrown,
+  );
+  assert.ok(error instanceof Error);
+  assert.equal(error.message.includes(SUBSCRIPTION_TOKEN), false);
+  assert.match(error.message, /\[redacted\]/u);
+  const networkFailure = await fetchSearch({
+    url: 'https://api.example.test/x',
+    apiKey: SUBSCRIPTION_TOKEN,
+    options: transportOptions({ maxAttempts: 1 }),
+    deps: { fetchImpl: scriptedFetch([{ reject: new TypeError('fetch failed', { cause: new Error('proxy rejected ' + SUBSCRIPTION_TOKEN) }) }]) },
+  }).then(
+    () => undefined,
+    (thrown) => thrown,
+  );
+  assert.equal(networkFailure.message.includes(SUBSCRIPTION_TOKEN), false);
 });
 
 test('RequestThrottle serializes concurrent dispatches', async () => {
