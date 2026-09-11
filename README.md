@@ -38,11 +38,34 @@ the tool contract.
 
 ## Install
 
+> **Do not install the bare name.** `dsh-web-search-brave` is taken on npm by an unrelated
+> third-party package (currently 0.2.3, another author, MIT) whose harness peers are pinned to
+> `^0.0.1-rc.*`. `npm install dsh-web-search-brave` fetches *that* package, not this one, and then
+> fails to resolve against a current harness. This plugin's package name is scoped:
+> **`@coldcanuk/dsh-web-search-brave`**.
+
+Install from this repository, by git URL or by path:
+
 ```sh
-npm install dsh-web-search-brave
-# or, straight from this repository:
 npm install github:coldcanuk/deepseek_brave_plugin
+# or, from a local clone:
+npm install /path/to/deepseek_brave_plugin
 ```
+
+Inside a harness profile, name it in the profile's `dependencies` (see
+[Adding it to a harness profile](#adding-it-to-a-harness-profile)):
+
+```json
+{
+  "dependencies": {
+    "@coldcanuk/dsh-web-search-brave": "github:coldcanuk/deepseek_brave_plugin"
+  }
+}
+```
+
+Inside this repository, plain `npm install` is all you need: it installs the peer packages and the
+single runtime dependency. Nothing here consumes the plugin by name, so do not run the bare-name
+install in this directory — it would add the unrelated registry package to this manifest.
 
 The package ships `lib/` only; there is nothing to compile and no postinstall step.
 
@@ -216,16 +239,20 @@ from the shipped bundle layers plus your own `cordis.patch.yml`.
 ```json
 {
   "dependencies": {
-    "dsh-web-search-brave": "github:coldcanuk/deepseek_brave_plugin"
+    "@coldcanuk/dsh-web-search-brave": "github:coldcanuk/deepseek_brave_plugin"
   }
 }
 ```
 
-or let the CLI forward the install to the profile's package manager:
+and install in that directory (`pnpm install`), or let the CLI forward the same git spec to the
+profile's package manager:
 
 ```sh
-dsh plugin --profile web add dsh-web-search-brave
+dsh plugin --profile web add github:coldcanuk/deepseek_brave_plugin
 ```
+
+Install by git URL or path, never by the bare name: the registry's `dsh-web-search-brave` is a
+different package (see [Install](#install)).
 
 **2. Add a patch entry** to `~/.dsh/profiles/web/cordis.patch.yml`. A patch can insert rows, and
 rows that do not exist yet must be inserted:
@@ -233,7 +260,7 @@ rows that do not exist yet must be inserted:
 ```yaml
 - insert:
     - id: web-search-brave
-      name: 'dsh-web-search-brave'
+      name: '@coldcanuk/dsh-web-search-brave'
       config:
         apiKeyEnv: BRAVE_SEARCH_API_KEY
 ```

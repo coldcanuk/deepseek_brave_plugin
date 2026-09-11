@@ -9,6 +9,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **Scoped npm package name** `@coldcanuk/dsh-web-search-brave`. The bare name
+  `dsh-web-search-brave` is taken on npm by an unrelated third-party package whose harness peers
+  are pinned to `^0.0.1-rc.*`, so installing the bare name fetched that package instead of this
+  one. Install from this repository by git URL or path. The cordis plugin name stays
+  `web-search-brave` and the provider id stays `brave-official`.
 - **Brave Search provider for `ctx.web`** registered as `brave-official` (`web-search-brave`
   settings namespace), so the model-facing `web_search` tool is answered by the Brave Search API.
 - **Two modes.** `llm-context` (default) queries `GET /res/v1/llm/context` for agent-oriented

@@ -1,6 +1,9 @@
 {
-  "name": "dsh-web-search-brave",
+  "name": "@coldcanuk/dsh-web-search-brave",
   "version": "1.0.0",
+  "publishConfig": {
+    "access": "public"
+  },
   "description": "Brave Search provider for the DeepSeek Harness web capability seam (ctx.web): agent-oriented LLM Context and results-page Web Search, keyed by the Brave Search API.",
   "type": "module",
   "license": "GPL-3.0-or-later",

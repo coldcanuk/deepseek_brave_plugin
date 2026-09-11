@@ -26,6 +26,25 @@ The repository is public and holds no credential of any kind. In particular:
 - `.gitignore` excludes `.env`, `.env.*` (with `.env.example` re-included), `*.pem`, `*.key`,
   `*.p12`, `*.pfx`, `*.secret`, `credentials.json`, `secrets.json`, and `.dsh/`.
 
+## Install source: verify it
+
+The bare npm registry name `dsh-web-search-brave` belongs to an **unrelated third-party package**
+(currently 0.2.3, another author, MIT) whose harness peers are pinned to `^0.0.1-rc.*`. This plugin
+is named `@coldcanuk/dsh-web-search-brave` and is normally installed from this repository by git
+URL or by path.
+
+Install by git URL or path, then check what you actually got:
+
+```sh
+npm ls @coldcanuk/dsh-web-search-brave
+node -e "console.log(require.resolve('@coldcanuk/dsh-web-search-brave/package.json'))"
+```
+
+This matters because a search provider runs inside the harness: it receives every search query the
+agent issues and it resolves the credential named by `apiKeyEnv`. Installing the wrong package
+hands both to that package. If a dependency tree resolves the bare name, remove it and install this
+repository instead.
+
 ## Credential model
 
 A Brave Search API key is resolved **once per search**, never at plugin load and never cached on
