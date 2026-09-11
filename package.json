@@ -18,11 +18,18 @@
   },
   "keywords": [
     "dsh",
+    "deepseek",
     "deepseek-harness",
     "brave-search",
+    "brave-search-api",
     "web-search",
+    "search-provider",
+    "llm-context",
+    "cordis",
     "cordis-plugin",
-    "plugin"
+    "plugin",
+    "ai-agents",
+    "llm-tools"
   ],
   "engines": {
     "node": ">=20"
