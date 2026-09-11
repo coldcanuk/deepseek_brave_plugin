@@ -251,6 +251,24 @@ profile's package manager:
 dsh plugin --profile web add github:coldcanuk/deepseek_brave_plugin
 ```
 
+If `dsh` is not on your PATH, that is expected when the harness was started with
+`npx @deepseek-ai/dsh …`: npx installs the CLI into its own cache and prepends that cache's
+`.bin` to the process it launches, so nothing lands in your shell PATH or in the global npm bin.
+Run the same command through npx, pinned to the version you are running, or call the cached binary
+directly:
+
+```sh
+npx @deepseek-ai/dsh@0.1.5-rc.1 plugin --profile web add github:coldcanuk/deepseek_brave_plugin
+~/.npm/_npx/*/node_modules/.bin/dsh plugin --profile web add github:coldcanuk/deepseek_brave_plugin
+```
+
+Do not install the `dsh` package your distribution offers (`apt install dsh`): that is an
+unrelated program, not this harness.
+
+The profile's package manager is already configured for out-of-tree plugins
+(`nodeLinker: hoisted`, `autoInstallPeers: false`), so the `@deepseek-ai/*` peers are not
+duplicated into the profile: the plugin binds to the running installation's own copies.
+
 Install by git URL or path, never by the bare name: the registry's `dsh-web-search-brave` is a
 different package (see [Install](#install)).
 
