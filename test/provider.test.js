@@ -147,7 +147,11 @@ test('the provider returns every source it received and never claims truncation'
 
 test('a missing credential is reported without any request leaving the process', async (t) => {
   const { server, provider } = await startHarness(t, { environment: {}, script: [{ body: llmContextBody() }] });
-  await rejectsWith(provider.search({ query: 'q' }), WEB_PROVIDER_CREDENTIAL_MISSING, new RegExp(DEFAULT_API_KEY_ENV, 'u'));
+  const error = await capture(provider.search({ query: 'q' }));
+  assert.equal(error.code, WEB_PROVIDER_CREDENTIAL_MISSING);
+  assert.match(error.message, new RegExp(DEFAULT_API_KEY_ENV, 'u'));
+  assert.match(error.message, /Settings > Plugins > Plugin configuration > Web search/u);
+  assert.match(error.message, /names the credential; it never holds the key itself/u, 'the message must teach the name-versus-value distinction');
   assert.equal(server.requests.length, 0);
 });
 

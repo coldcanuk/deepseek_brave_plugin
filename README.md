@@ -279,8 +279,14 @@ prompt, not a file edit:
 - or `BRAVE_SEARCH_API_KEY=…` in `~/.dsh/.env` (the Harness-home layer, read at launch, never
   part of a repository), or exported in the launching shell.
 
+If a search then fails with `WEB_PROVIDER_CREDENTIAL_MISSING`, the value never reached the
+plugin. The usual cause is typing the key into the `apiKeyEnv` field: that field holds the
+credential's *name* (`BRAVE_SEARCH_API_KEY`), not the key itself, so a key typed there is stored
+nowhere. Set the value *behind* the reference instead — the settings route needs no restart,
+because the key is resolved once per search.
+
 **3. Restart the harness.** A profile's patch layer is live-reloaded, but a newly installed
-dependency is picked up at boot. If the key is missing, the first search fails with
+dependency is picked up at boot. A missing key surfaces on the first search as
 `WEB_PROVIDER_CREDENTIAL_MISSING` naming the reference — it never silently returns nothing.
 
 ### What the bundled layer sets
