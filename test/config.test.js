@@ -22,10 +22,14 @@ import {
   maxCountForMode,
   resolveOptions,
 } from '../lib/config.js';
+import { missingToolExecFile, scriptedExecFile } from './helpers/fake-secret-tools.js';
 
 /** Every field the README documents, and therefore every field the schema must carry. */
 const DOCUMENTED_FIELDS = [
   'apiKeyEnv',
+  'secretManager',
+  'gnomeKeyringAttributes',
+  'passPath',
   'baseURL',
   'mode',
   'country',
@@ -81,6 +85,9 @@ test('Config applies the documented defaults and leaves unset options absent', (
   assert.equal(resolved.maxAttempts, 3);
   assert.equal(resolved.retryBaseMs, 250);
   assert.equal(resolved.minIntervalMs, 0);
+  assert.equal(resolved.secretManager, 'auto');
+  assert.deepEqual(resolved.gnomeKeyringAttributes, { service: 'dsh-web-search-brave' });
+  assert.equal(resolved.passPath, 'dsh/brave-search-api');
   assert.equal('baseURL' in resolved, false);
   assert.equal('safesearch' in resolved, false);
   assert.equal('freshness' in resolved, false);
@@ -92,6 +99,7 @@ test('Config rejects an out-of-enum value and an out-of-range count', () => {
   assert.throws(() => Config({ safesearch: 'sometimes' }));
   assert.throws(() => Config({ count: 99 }));
   assert.throws(() => Config({ maxTokens: 1 }));
+  assert.throws(() => Config({ secretManager: 'keychain' }));
 });
 
 test('resolveOptions applies every default without an environment', () => {
@@ -110,6 +118,29 @@ test('resolveOptions applies every default without an environment', () => {
   assert.equal(options.maxAttempts, 3);
   assert.equal(options.retryBaseMs, 250);
   assert.equal(options.minIntervalMs, 0);
+  assert.equal(options.secretManager, 'auto');
+  assert.deepEqual(options.gnomeKeyringAttributes, { service: 'dsh-web-search-brave' });
+  assert.equal(options.passPath, 'dsh/brave-search-api');
+});
+
+test('resolveOptions corrects unusable secret-manager settings instead of throwing', () => {
+  const options = resolveOptions(contextWith(), {
+    secretManager: 'keychain',
+    gnomeKeyringAttributes: { service: 42, '--flag': 'x', Title: 'Brave Search API Paid' },
+    passPath: '   ',
+  });
+  assert.equal(options.secretManager, 'auto');
+  assert.deepEqual(options.gnomeKeyringAttributes, { Title: 'Brave Search API Paid' });
+  assert.equal(options.passPath, 'dsh/brave-search-api');
+  assert.deepEqual(resolveOptions(contextWith(), { gnomeKeyringAttributes: { service: '' } }).gnomeKeyringAttributes, { service: 'dsh-web-search-brave' });
+  assert.deepEqual(resolveOptions(contextWith(), { gnomeKeyringAttributes: 'nonsense' }).gnomeKeyringAttributes, { service: 'dsh-web-search-brave' });
+});
+
+test('resolveOptions keeps usable secret-manager settings', () => {
+  const options = resolveOptions(contextWith(), { secretManager: 'pass', passPath: 'work/brave', gnomeKeyringAttributes: { Title: 'Brave Search API Paid' } });
+  assert.equal(options.secretManager, 'pass');
+  assert.equal(options.passPath, 'work/brave');
+  assert.deepEqual(options.gnomeKeyringAttributes, { Title: 'Brave Search API Paid' });
 });
 
 test('resolveOptions falls back to the environment for baseURL and lets config win', () => {
@@ -207,22 +238,63 @@ test('resolveApiKey prefers the credential service and re-resolves per call', as
       return { value, source: 'file' };
     },
   };
-  const options = resolveOptions(contextWith({ credentials, environment: { [DEFAULT_API_KEY_ENV]: 'ambient-value' } }), undefined);
-  assert.equal(await options.resolveApiKey(), 'first-value-from-service');
+  const execFile = missingToolExecFile();
+  const options = resolveOptions(contextWith({ credentials, environment: { [DEFAULT_API_KEY_ENV]: 'ambient-value' } }), undefined, { execFile });
+  assert.equal((await options.resolveApiKey()).value, 'first-value-from-service');
   value = 'second-value-from-service';
-  assert.equal(await options.resolveApiKey(), 'second-value-from-service');
+  assert.equal((await options.resolveApiKey()).value, 'second-value-from-service');
   assert.deepEqual(asked, [DEFAULT_API_KEY_ENV, DEFAULT_API_KEY_ENV]);
+  assert.deepEqual(execFile.calls, [], 'the store answers before any password manager is consulted');
+});
+
+test('resolveApiKey falls back to a password manager when the store is empty', async () => {
+  const credentials = { resolve: async () => undefined };
+  const execFile = scriptedExecFile({ 'secret-tool lookup service dsh-web-search-brave': 'keyring-value' });
+  const options = resolveOptions(contextWith({ credentials }), undefined, { execFile });
+  const resolved = await options.resolveApiKey();
+  assert.equal(resolved.value, 'keyring-value');
+  assert.equal(resolved.source, 'gnome-keyring');
+  assert.match(resolved.attempted.join(' '), /harness credential store/u);
+});
+
+test('resolveApiKey falls through the keyring to pass', async () => {
+  const execFile = scriptedExecFile({ 'pass show dsh/brave-search-api': 'pass-value' });
+  const options = resolveOptions(contextWith(), undefined, { execFile });
+  const resolved = await options.resolveApiKey();
+  assert.equal(resolved.value, 'pass-value');
+  assert.equal(resolved.source, 'pass');
+  assert.deepEqual(execFile.calls.map((call) => call.file), ['secret-tool', 'pass']);
+});
+
+test('resolveApiKey with secretManager none reads no password manager', async () => {
+  const execFile = missingToolExecFile();
+  const options = resolveOptions(contextWith({ environment: { [DEFAULT_API_KEY_ENV]: 'ambient' } }), { secretManager: 'none' }, { execFile });
+  assert.equal((await options.resolveApiKey()).value, 'ambient');
+  assert.deepEqual(execFile.calls, []);
 });
 
 test('resolveApiKey uses the launch environment when no credential service exists', async () => {
   const environment = { BRAVE_TEST_KEY_NAME: 'ambient-token' };
-  const options = resolveOptions(contextWith({ environment }), { apiKeyEnv: 'BRAVE_TEST_KEY_NAME' });
-  assert.equal(await options.resolveApiKey(), 'ambient-token');
+  const execFile = missingToolExecFile();
+  const options = resolveOptions(contextWith({ environment }), { apiKeyEnv: 'BRAVE_TEST_KEY_NAME' }, { execFile });
+  const resolved = await options.resolveApiKey();
+  assert.equal(resolved.value, 'ambient-token');
+  assert.equal(resolved.source, 'launch environment');
+  assert.match(resolved.attempted.join(' '), /gnome-keyring/u);
+});
+
+test('resolveApiKey skips the environment when a credential service is mounted', async () => {
+  const credentials = { resolve: async () => undefined };
+  const options = resolveOptions(contextWith({ credentials, environment: { [DEFAULT_API_KEY_ENV]: 'ambient-value' } }), undefined, { execFile: missingToolExecFile() });
+  const resolved = await options.resolveApiKey();
+  assert.equal(resolved.value, undefined);
+  assert.match(resolved.attempted.join(' '), /harness credential store/u);
+  assert.equal(resolved.attempted.join(' ').includes('launch environment'), false);
 });
 
 test('resolveApiKey reports an unset or empty ambient value as absent', async () => {
-  assert.equal(await resolveOptions(contextWith(), undefined).resolveApiKey(), undefined);
-  assert.equal(await resolveOptions(contextWith({ environment: { [DEFAULT_API_KEY_ENV]: '' } }), undefined).resolveApiKey(), undefined);
+  assert.equal((await resolveOptions(contextWith(), undefined, { execFile: missingToolExecFile() }).resolveApiKey()).value, undefined);
+  assert.equal((await resolveOptions(contextWith({ environment: { [DEFAULT_API_KEY_ENV]: '' } }), undefined, { execFile: missingToolExecFile() }).resolveApiKey()).value, undefined);
 });
 
 test('recordRequest appends the secret-free request event to the current session', () => {

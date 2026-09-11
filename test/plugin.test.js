@@ -102,7 +102,7 @@ test('the registered provider searches the configured base URL end to end', asyn
   t.after(() => server.close());
   server.json(llmContextBody({ generic: [{ url: 'https://example.test/a', title: 'A', snippets: ['chunk'] }] }));
   const host = fakeHost();
-  apply(host.ctx, { baseURL: server.baseURL, mode: 'llm-context' });
+  apply(host.ctx, { baseURL: server.baseURL, mode: 'llm-context', secretManager: 'none' });
   const result = await host.registered[0].search({ query: 'cordis', maxResults: 3 });
   assert.deepEqual(result.sources, [{ url: 'https://example.test/a', title: 'A', snippet: 'chunk' }]);
   assert.equal(server.requests.length, 1);

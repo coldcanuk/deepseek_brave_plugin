@@ -6,6 +6,7 @@
  */
 import type { Context } from '@deepseek-ai/cordis';
 import type { CredentialRef } from '@deepseek-ai/dsh-credentials';
+import type { SecretExecFile, SecretManager } from './secrets.js';
 import z from '@deepseek-ai/schemastery';
 
 /** Settings namespace this plugin installs its section under. */
@@ -91,6 +92,12 @@ export type BraveContextThresholdMode = 'strict' | 'balanced' | 'lenient' | 'dis
 export interface Config {
     /** Credential reference holding the Brave Search API key. Defaults to `BRAVE_SEARCH_API_KEY`. */
     apiKeyEnv?: string;
+    /** Password manager to consult besides the harness credential store. Defaults to `auto`. */
+    secretManager?: SecretManager;
+    /** Attributes identifying the GNOME keyring item. Defaults to `{ service: 'dsh-web-search-brave' }`. */
+    gnomeKeyringAttributes?: Readonly<Record<string, string>>;
+    /** Entry path inside the `pass` password store. Defaults to `dsh/brave-search-api`. */
+    passPath?: string;
     /** Brave Search API base. Defaults to `BRAVE_SEARCH_BASE_URL`, then the public API base. */
     baseURL?: string;
     /** Which endpoint answers a search. Defaults to `llm-context`. */
@@ -135,12 +142,28 @@ export interface BraveSearchRequestEvent {
     readonly params: Readonly<Record<string, string | number>>;
 }
 
+/** What one credential resolution found, and what it tried when it found nothing. */
+export interface BraveCredentialResolution {
+    /** The resolved value, when one was found. */
+    readonly value?: string;
+    /** Which source supplied it: `credentials:<layer>`, `gnome-keyring`, `pass`, or `launch environment`. */
+    readonly source?: string;
+    /** Secret-free notes for every source consulted before the outcome. */
+    readonly attempted: readonly string[];
+}
+
 /** Resolved provider options: every value fully defaulted, with the credential left as a thunk. */
 export interface BraveSearchProviderOptions {
     /** Resolve the current Brave API key for one search operation. */
-    readonly resolveApiKey: () => Promise<string | undefined>;
+    readonly resolveApiKey: (signal?: AbortSignal) => Promise<BraveCredentialResolution>;
     /** Credential reference named by missing-credential diagnostics. */
     readonly apiKeyEnv: CredentialRef;
+    /** Password manager consulted besides the harness credential store. */
+    readonly secretManager: SecretManager;
+    /** Attributes identifying the GNOME keyring item. */
+    readonly gnomeKeyringAttributes: Readonly<Record<string, string>>;
+    /** Entry path inside the `pass` password store. */
+    readonly passPath: string;
     /** Endpoint base; the mode's path is appended. */
     readonly baseURL: string;
     /** Which endpoint answers a search. */
@@ -185,4 +208,6 @@ export declare function oneOf<T extends string>(value: unknown, allowed: readonl
 /** Brand the configured credential reference, falling back when the name is unusable. */
 export declare function credentialReferenceOr(value: unknown, fallback: string): CredentialRef;
 /** Project one authoritative config section into the options the provider serves its next search with. */
-export declare function resolveOptions(ctx: Context, config: Config | undefined): BraveSearchProviderOptions;
+export declare function resolveOptions(ctx: Context, config: Config | undefined, deps?: {
+    execFile?: SecretExecFile;
+}): BraveSearchProviderOptions;

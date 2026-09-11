@@ -9,6 +9,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **Password-manager credential sources.** The key can live in the GNOME keyring
+  (`secret-tool lookup service dsh-web-search-brave`) or in `pass` (`pass show
+  dsh/brave-search-api`) instead of a cleartext file, selected by the new `secretManager`,
+  `gnomeKeyringAttributes`, and `passPath` options. Resolution is a fixed chain — harness
+  credential store, then the configured password manager, then the launch environment only when no
+  credential provider is mounted — and `WEB_PROVIDER_CREDENTIAL_MISSING` now lists every source
+  tried. Lookups are best-effort (a missing, locked, empty, or slow tool falls through), use a
+  closed set of executables through `execFile` with no shell, never carry the secret in argv, and
+  never log tool output.
 - **Profile bundle declaration** (`dsh.bundle.patch` plus a shipped `cordis.patch.yml`), so
   `dsh plugin --profile <name> add` installs the plugin *and* composes it — registering the
   provider and pinning the `web` seam at `brave-official` — with no patch-file editing, and

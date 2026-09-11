@@ -14,6 +14,7 @@ import { DEFAULT_API_KEY_ENV, PROVIDER_ID, SEARCH_REQUEST_EVENT, resolveOptions 
 import { WEB_ABORTED, WEB_PROVIDER_CREDENTIAL_MISSING, WEB_PROVIDER_ERROR } from '../lib/errors.js';
 import { BraveSearchProvider } from '../lib/provider.js';
 import { MOCK_LLM_CONTEXT_PATH, MOCK_WEB_SEARCH_PATH, llmContextBody, startMockBrave, webSearchBody } from './helpers/mock-brave.js';
+import { missingToolExecFile, scriptedExecFile } from './helpers/fake-secret-tools.js';
 
 /** An obvious fixture, never a usable credential. */
 const SUBSCRIPTION_TOKEN = 'brave-fixture-value-not-a-real-credential';
@@ -34,14 +35,16 @@ function contextWith({ environment = {}, credentials, events } = {}) {
 }
 
 /** Start a mock server and a provider pointed at it, closed automatically. */
-async function startHarness(t, { config = {}, environment, credentials, events, script = [] } = {}) {
+async function startHarness(t, { config = {}, environment, credentials, events, script = [], execFile } = {}) {
   const server = await startMockBrave();
   t.after(() => server.close());
   for (const step of script) server.enqueue(step);
   const resolvedEnvironment = environment ?? { [DEFAULT_API_KEY_ENV]: SUBSCRIPTION_TOKEN };
   const ctx = contextWith({ environment: resolvedEnvironment, credentials, events });
-  const options = resolveOptions(ctx, { baseURL: server.baseURL, ...config });
-  return { server, options, provider: new BraveSearchProvider(() => options) };
+  const secretRunner = execFile ?? missingToolExecFile();
+  const build = (deps) => resolveOptions(ctx, { baseURL: server.baseURL, ...config }, { execFile: secretRunner, ...(deps ?? {}) });
+  const options = build();
+  return { server, options, provider: new BraveSearchProvider((deps) => build(deps)) };
 }
 
 /** Run a search and return the thrown error instead of failing the test. */
@@ -146,7 +149,7 @@ test('the provider returns every source it received and never claims truncation'
 });
 
 test('a missing credential is reported without any request leaving the process', async (t) => {
-  const { server, provider } = await startHarness(t, { environment: {}, script: [{ body: llmContextBody() }] });
+  const { server, provider } = await startHarness(t, { environment: {}, config: { secretManager: 'none' }, script: [{ body: llmContextBody() }] });
   const error = await capture(provider.search({ query: 'q' }));
   assert.equal(error.code, WEB_PROVIDER_CREDENTIAL_MISSING);
   assert.match(error.message, new RegExp(DEFAULT_API_KEY_ENV, 'u'));
@@ -172,7 +175,47 @@ test('a credential from the credential service authenticates the request', async
 test('an unconfigured credential service does not fall back to the environment', async (t) => {
   const credentials = { resolve: async () => undefined };
   const { provider } = await startHarness(t, { credentials, script: [{ body: llmContextBody() }] });
-  await rejectsWith(provider.search({ query: 'q' }), WEB_PROVIDER_CREDENTIAL_MISSING);
+  const error = await capture(provider.search({ query: 'q' }));
+  assert.equal(error.code, WEB_PROVIDER_CREDENTIAL_MISSING);
+  assert.match(error.message, /harness credential store/u);
+  assert.equal(error.message.includes('launch environment'), false, 'the environment is not consulted while a credential service is mounted');
+});
+
+test('a key read from the GNOME keyring authenticates a real request', async (t) => {
+  const execFile = scriptedExecFile({ 'secret-tool lookup service dsh-web-search-brave': SUBSCRIPTION_TOKEN });
+  const { server, provider } = await startHarness(t, { environment: {}, execFile, script: [{ body: llmContextBody({ generic: [{ url: 'https://example.test/a' }] }) }] });
+  const result = await provider.search({ query: 'q' });
+  assert.equal(result.sources.length, 1);
+  assert.equal(server.requests[0].headers[SUBSCRIPTION_TOKEN_HEADER], SUBSCRIPTION_TOKEN);
+  assert.deepEqual(execFile.calls.map((call) => call.file), ['secret-tool']);
+});
+
+test('a key read from pass is used when the keyring has nothing', async (t) => {
+  const execFile = scriptedExecFile({ 'pass show dsh/brave-search-api': SUBSCRIPTION_TOKEN + '\nnotes\n' });
+  const { server, provider } = await startHarness(t, { environment: {}, execFile, config: { secretManager: 'pass' }, script: [{ body: llmContextBody({ generic: [{ url: 'https://example.test/a' }] }) }] });
+  const result = await provider.search({ query: 'q' });
+  assert.equal(result.sources.length, 1);
+  assert.equal(server.requests[0].headers[SUBSCRIPTION_TOKEN_HEADER], SUBSCRIPTION_TOKEN);
+  assert.deepEqual(execFile.calls.map((call) => call.file), ['pass']);
+});
+
+test('a key pasted into the reference field is never echoed in the failure', async (t) => {
+  const pasted = 'BSA' + 'A'.repeat(28);
+  const { provider } = await startHarness(t, { environment: {}, config: { apiKeyEnv: pasted, secretManager: 'none' }, script: [] });
+  const error = await capture(provider.search({ query: 'q' }));
+  assert.equal(error.code, WEB_PROVIDER_CREDENTIAL_MISSING);
+  assert.equal(error.message.includes(pasted), false, 'the pasted value must not be copied into the message');
+  assert.match(error.message, /it looks like a key, not a name/u);
+});
+
+test('the missing-credential error lists every source that was tried', async (t) => {
+  const { provider } = await startHarness(t, { environment: {}, script: [] });
+  const error = await capture(provider.search({ query: 'q' }));
+  assert.equal(error.code, WEB_PROVIDER_CREDENTIAL_MISSING);
+  assert.match(error.message, /Where the key was looked for, in order:/u);
+  assert.match(error.message, /gnome-keyring/u);
+  assert.match(error.message, /pass \(/u);
+  assert.match(error.message, /launch environment/u);
 });
 
 test('a 429 is retried and the search still succeeds', async (t) => {

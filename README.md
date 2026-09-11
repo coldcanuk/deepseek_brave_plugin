@@ -72,28 +72,69 @@ and no postinstall step.
 
 ## Credentials
 
-The plugin never stores a key and offers no field that accepts one. A search resolves the key, in
-this order:
+The plugin never stores a key and offers no field that accepts one. A search resolves the key once
+per search, in this fixed order, and stops at the first hit:
 
-1. `ctx.credentials.resolve(apiKeyEnv)` — the harness credential service, for example a value
-   written by a settings UI or a credential file. Resolution happens once per search, so a rotated
-   key reaches the next search with no restart.
-2. The launch environment (`launchEnvironmentOf(ctx)`, which layers the inherited environment, the
+1. `ctx.credentials.resolve(apiKeyEnv)` — the harness credential store, for example a value written
+   by the settings page. Resolution being per search, a rotated key reaches the next search with no
+   restart.
+2. A **password manager**, when `secretManager` is not `none`: the GNOME keyring through
+   `secret-tool`, then the standard Unix password manager `pass`. Neither is required, and neither
+   is consulted when the store already answered.
+3. The launch environment (`launchEnvironmentOf(ctx)`, layering the inherited environment, the
    invoking directory's `.env`, and the harness home's `.env`), read from the variable named by
-   `apiKeyEnv`.
+   `apiKeyEnv` — and only when no credential provider is mounted at all.
 
-If neither yields a non-empty value the search fails with
-`WEB_PROVIDER_CREDENTIAL_MISSING` naming the reference. (An empty ambient value counts as absent;
-the credential service is authoritative when it is registered, and there is no silent fallback
-from it to the environment.)
+Finding nothing raises `WEB_PROVIDER_CREDENTIAL_MISSING`, which names the reference and lists every
+source that was tried.
 
-The quickest local setup is an exported variable in the environment that launches the harness:
+### Password managers (recommended: no cleartext key on disk)
+
+Store the key once under these names; the plugin looks it up with exactly the same commands.
+
+**GNOME keyring** — one item, attribute `service=dsh-web-search-brave`:
 
 ```sh
-export BRAVE_SEARCH_API_KEY=...   # your key, in your shell, never in this repository
+secret-tool store --label='Brave Search API (dsh-web-search-brave)' service dsh-web-search-brave
+secret-tool lookup service dsh-web-search-brave     # what the plugin runs
 ```
 
-`.env.example` in this repository lists the two recognised variable names with placeholder values.
+`secret-tool store` prompts for the secret itself, so it never reaches shell history or a process
+list. To point at an item you already have instead, name its attributes in
+`gnomeKeyringAttributes` — for example a GNOME Passwords note:
+
+```json
+{ "gnomeKeyringAttributes": { "xdg:schema": "org.gnome.keyring.Note", "Title": "Brave Search API Paid" } }
+```
+
+Run `secret-tool search --all --unlock` in your desktop session to see the attribute names an item
+actually carries.
+
+**pass** — entry `dsh/brave-search-api`:
+
+```sh
+pass insert dsh/brave-search-api                    # prompts twice; nothing in argv
+pass show dsh/brave-search-api                      # what the plugin runs; first line is the key
+```
+
+Change the entry path with `passPath`, or turn the whole step off with `secretManager: "none"`.
+
+Every lookup is best-effort: a tool that is absent, locked, empty, or slower than 5 s yields nothing
+and the chain moves on. The executable names are fixed here and never taken from configuration, calls
+go through `execFile` with no shell, and no tool output is ever logged or embedded in an error.
+
+### Without a password manager
+
+The settings page (Settings → Plugins → Plugin configuration → Web search) stores the value in the
+harness credential store: the intended route, and it needs no restart. The cleartext fallbacks are
+an exported variable in the launching environment, or a line in `~/.dsh/.env` (`chmod 600`), which
+sits outside every repository:
+
+```sh
+export BRAVE_SEARCH_API_KEY=...   # your shell, never a repository file
+```
+
+`.env.example` lists the two recognised variable names with placeholder values.
 
 ## Configuration
 
@@ -113,6 +154,9 @@ replaces it.
 | Field | Type | Default | Notes |
 | --- | --- | --- | --- |
 | `apiKeyEnv` | string, credential reference | `BRAVE_SEARCH_API_KEY` | Name of the credential holding the key. There is deliberately no literal-key field. |
+| `secretManager` | `auto` \| `none` \| `gnome-keyring` \| `pass` | `auto` | Which password manager to consult besides the harness credential store. `auto` tries the GNOME keyring, then `pass`; `none` disables both. |
+| `gnomeKeyringAttributes` | object of strings | `{ "service": "dsh-web-search-brave" }` | Attributes identifying the GNOME keyring item, exactly as `secret-tool lookup` receives them. |
+| `passPath` | string | `dsh/brave-search-api` | Entry path inside the `pass` password store. |
 | `baseURL` | string | `BRAVE_SEARCH_BASE_URL`, then `https://api.search.brave.com/res/v1` | `/res/v1` included; the mode's path is appended. |
 | `mode` | `llm-context` \| `web-search` | `llm-context` | Which endpoint answers a search. |
 | `country` | string | `us` | ISO 3166-1 alpha-2 country code. |
@@ -271,13 +315,23 @@ profile's package manager is already configured for out-of-tree plugins
 duplicated into the profile: the plugin binds to the running installation's own copies.
 
 **2. Supply the key once.** The configuration section is registered at install time, so this is a
-prompt, not a file edit:
+prompt, not a file edit. Best first, because it keeps the key encrypted at rest:
 
+- **A password manager.** Store the key once and the plugin reads it from there:
+
+  ```sh
+  secret-tool store --label='Brave Search API (dsh-web-search-brave)' service dsh-web-search-brave
+  pass insert dsh/brave-search-api
+  ```
+
+  Both prompt for the value; neither needs a file. See
+  [Password managers](#password-managers-recommended-no-cleartext-key-on-disk) for pointing at an
+  entry you already have.
 - **Settings → Plugins → Plugin configuration → Web search** (the `web-search-brave` section).
   The `apiKeyEnv` row is a credential reference; the page stores the value through the harness
-  credential service and can replace or clear it later.
-- or `BRAVE_SEARCH_API_KEY=…` in `~/.dsh/.env` (the Harness-home layer, read at launch, never
-  part of a repository), or exported in the launching shell.
+  credential store and can replace or clear it later.
+- **`~/.dsh/.env`** (`chmod 600`) or an exported `BRAVE_SEARCH_API_KEY`, if you accept a cleartext
+  copy.
 
 If a search then fails with `WEB_PROVIDER_CREDENTIAL_MISSING`, the value never reached the
 plugin. The usual cause is typing the key into the `apiKeyEnv` field: that field holds the
