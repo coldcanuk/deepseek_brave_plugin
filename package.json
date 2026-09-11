@@ -59,8 +59,8 @@
   "scripts": {
     "test": "node scripts/check-test-gate.mjs",
     "test:raw": "node --test",
-    "test:coverage": "node --test --experimental-test-coverage --test-coverage-include=lib/**",
-    "check:coverage": "node --test --experimental-test-coverage --test-coverage-include=lib/** --test-coverage-lines=95 --test-coverage-branches=88 --test-coverage-functions=92",
+    "test:coverage": "node scripts/check-coverage.mjs --report",
+    "check:coverage": "node scripts/check-coverage.mjs",
     "check:test-gate": "node scripts/check-test-gate.mjs",
     "check:secrets": "node scripts/check-secrets.mjs",
     "check:types": "node scripts/check-types.mjs",
