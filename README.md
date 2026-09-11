@@ -67,7 +67,8 @@ Inside this repository, plain `npm install` is all you need: it installs the pee
 single runtime dependency. Nothing here consumes the plugin by name, so do not run the bare-name
 install in this directory — it would add the unrelated registry package to this manifest.
 
-The package ships `lib/` only; there is nothing to compile and no postinstall step.
+The package ships `lib/` and its `cordis.patch.yml` bundle layer; there is nothing to compile
+and no postinstall step.
 
 ## Credentials
 
@@ -231,25 +232,20 @@ No headers, and no key. Recording is inert when no agent session is attached.
 ## Adding it to a harness profile
 
 A profile lives at `~/.dsh/profiles/<name>` (the built-in web profile is `web`) and is composed
-from the shipped bundle layers plus your own `cordis.patch.yml`.
+from an ordered stack of bundle patch layers under the profile's own overrides. This package
+declares `dsh.bundle.patch`, which makes it a **bundle**: it installs itself and configures
+itself.
 
-**1. Add the package to the profile.** Either edit
-`~/.dsh/profiles/web/package.json` and add it to `dependencies`:
-
-```json
-{
-  "dependencies": {
-    "@coldcanuk/dsh-web-search-brave": "github:coldcanuk/deepseek_brave_plugin"
-  }
-}
-```
-
-and install in that directory (`pnpm install`), or let the CLI forward the same git spec to the
-profile's package manager:
+**1. Install it.** One command:
 
 ```sh
 dsh plugin --profile web add github:coldcanuk/deepseek_brave_plugin
 ```
+
+That forwards `add` to pnpm in the profile directory and then reconciles the profile's
+`dsh.profile.bundles`: a dependency whose manifest declares `dsh.bundle` joins the layer stack.
+This package's own `cordis.patch.yml` is therefore applied on the next boot — it registers the
+provider and points the `web` seam at `brave-official` — and there is no patch file to edit.
 
 If `dsh` is not on your PATH, that is expected when the harness was started with
 `npx @deepseek-ai/dsh …`: npx installs the CLI into its own cache and prepends that cache's
@@ -263,45 +259,54 @@ npx @deepseek-ai/dsh@0.1.5-rc.1 plugin --profile web add github:coldcanuk/deepse
 ```
 
 Do not install the `dsh` package your distribution offers (`apt install dsh`): that is an
-unrelated program, not this harness.
-
-The profile's package manager is already configured for out-of-tree plugins
+unrelated program, not this harness. Install this plugin by git URL or path, never by the bare
+name: the registry's `dsh-web-search-brave` is a different package (see [Install](#install)). The
+profile's package manager is already configured for out-of-tree plugins
 (`nodeLinker: hoisted`, `autoInstallPeers: false`), so the `@deepseek-ai/*` peers are not
 duplicated into the profile: the plugin binds to the running installation's own copies.
 
-Install by git URL or path, never by the bare name: the registry's `dsh-web-search-brave` is a
-different package (see [Install](#install)).
+**2. Supply the key once.** The configuration section is registered at install time, so this is a
+prompt, not a file edit:
 
-**2. Add a patch entry** to `~/.dsh/profiles/web/cordis.patch.yml`. A patch can insert rows, and
-rows that do not exist yet must be inserted:
+- **Settings → Plugins → Plugin configuration → Web search** (the `web-search-brave` section).
+  The `apiKeyEnv` row is a credential reference; the page stores the value through the harness
+  credential service and can replace or clear it later.
+- or `BRAVE_SEARCH_API_KEY=…` in `~/.dsh/.env` (the Harness-home layer, read at launch, never
+  part of a repository), or exported in the launching shell.
 
-```yaml
-- insert:
-    - id: web-search-brave
-      name: '@coldcanuk/dsh-web-search-brave'
-      config:
-        apiKeyEnv: BRAVE_SEARCH_API_KEY
-```
+**3. Restart the harness.** A profile's patch layer is live-reloaded, but a newly installed
+dependency is picked up at boot. If the key is missing, the first search fails with
+`WEB_PROVIDER_CREDENTIAL_MISSING` naming the reference — it never silently returns nothing.
 
-**3. Point the `web` seam at it.** A patch replaces the targeted row's whole `config`, so restate
-your existing `fetchProvider` (and anything else that row carries):
+### What the bundled layer sets
+
+It pins `searchProvider: brave-official`. That is required, not cosmetic: when no id is
+configured and **more than one** registered provider is usable, the seam fails with
+`WEB_PROVIDER_AMBIGUOUS` instead of choosing by registration order — which is exactly the
+situation next to the shipped DeepSeek provider. Setting
+`DSH_WEB_SEARCH_PROVIDER=brave-official` in the launch environment is equivalent.
+
+It also restates `fetchProvider: http`, because a patch replaces the targeted row's whole
+`config` rather than merging into it.
+
+### Overriding the defaults
+
+The profile's own `~/.dsh/profiles/web/cordis.patch.yml` is applied after every bundle layer, so
+anything set there wins:
 
 ```yaml
 - id: web
   config:
     searchProvider: brave-official
-    fetchProvider: http
+    fetchProvider: http      # or whatever your profile uses
 ```
 
-Pinning `searchProvider` is required, not cosmetic: the seam resolves a provider at execution
-time, and when no id is configured and **more than one** registered provider is usable it fails
-with `WEB_PROVIDER_AMBIGUOUS` rather than picking by registration order. Registering this plugin
-next to the shipped DeepSeek provider is exactly that situation. Setting
-`DSH_WEB_SEARCH_PROVIDER=brave-official` in the launch environment is equivalent to the `web`
-row's `searchProvider`.
+Any other option — the mode, the country, the result count, the retry budget — is changed in
+**Settings → Plugins → Plugin configuration → Web search** without touching a file.
 
-Finally, supply the key (export `BRAVE_SEARCH_API_KEY`, or store it through the credentials
-service) and restart the harness.
+Removing the plugin reverses the install automatically:
+`dsh plugin --profile web remove @coldcanuk/dsh-web-search-brave` drops it from the layer stack,
+and the `web` row falls back to the shipped defaults.
 
 ## Running the tests
 
@@ -332,6 +337,8 @@ lib/map.js         pure Brave response -> WebSearchResult mappers
 lib/client.js      URL building, fetch, timeout, retry, throttle
 lib/provider.js    BraveSearchProvider (id, available, search)
 lib/types/*.d.ts   hand-authored declarations for every lib module
+cordis.patch.yml   bundle patch layer: registers the provider, pins ctx.web at
+                   brave-official, and ships so `dsh plugin add` composes it
 test/              node:test suite plus the mock Brave server
 ```
 

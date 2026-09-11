@@ -9,6 +9,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **Profile bundle declaration** (`dsh.bundle.patch` plus a shipped `cordis.patch.yml`), so
+  `dsh plugin --profile <name> add` installs the plugin *and* composes it — registering the
+  provider and pinning the `web` seam at `brave-official` — with no patch-file editing, and
+  `remove` reverses it. The API key is set from the harness settings page (a credential
+  reference) or the launch environment.
 - **Scoped npm package name** `@coldcanuk/dsh-web-search-brave`. The bare name
   `dsh-web-search-brave` is taken on npm by an unrelated third-party package whose harness peers
   are pinned to `^0.0.1-rc.*`, so installing the bare name fetched that package instead of this

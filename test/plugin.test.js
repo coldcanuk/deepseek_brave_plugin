@@ -6,6 +6,7 @@
  * replace the composition entry without re-registering the provider.
  */
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import { createLaunchEnvironmentSnapshot } from '@deepseek-ai/dsh-launch-environment';
 import { Config, DEFAULT_API_KEY_ENV, PROVIDER_ID, SETTINGS_NAMESPACE, apply, inject, name } from '../lib/index.js';
@@ -107,4 +108,18 @@ test('the registered provider searches the configured base URL end to end', asyn
   assert.equal(server.requests.length, 1);
   assert.equal(server.requests[0].params.q, 'cordis');
   assert.equal(server.requests[0].params.count, '3');
+});
+
+test('the package declares itself a profile bundle that dsh plugin add composes', () => {
+  const manifest = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
+  assert.equal(manifest.dsh?.bundle?.patch, './cordis.patch.yml');
+  assert.ok(manifest.files.includes('cordis.patch.yml'), 'the patch layer must ship in the tarball');
+  assert.equal(manifest.exports['./cordis.patch.yml'], './cordis.patch.yml');
+  const layer = readFileSync(new URL('../cordis.patch.yml', import.meta.url), 'utf8');
+  assert.match(layer, /^- insert:/m, 'the provider row must be inserted');
+  assert.match(layer, /id: web-search-brave/);
+  assert.match(layer, /name: '@coldcanuk\/dsh-web-search-brave'/);
+  assert.match(layer, /searchProvider: brave-official/);
+  assert.match(layer, /fetchProvider: http/);
+  assert.doesNotMatch(layer, /apiKey\s*:/, 'the bundle layer must never carry a literal key field');
 });

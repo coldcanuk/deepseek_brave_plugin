@@ -1,0 +1,33 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 Chuck <chuck@actvite.com>
+# dsh-web-search-brave — bundle patch layer.
+#
+# package.json declares "dsh": { "bundle": { "patch": "./cordis.patch.yml" } },
+# which makes this package a profile bundle: `dsh plugin --profile <name> add
+# <this package>` installs it, appends it to the profile's
+# `dsh.profile.bundles` list, and applies this layer on the next boot. No
+# patch file has to be edited by hand, and removing the dependency removes the
+# layer again.
+#
+# Layer order: shipped bundles first, then this one, then the profile's own
+# cordis.patch.yml — which is applied last and therefore still wins.
+#
+# Row 1 registers the provider. Row 2 points the web seam at it. A patch
+# replaces the target row's whole `config`, so `fetchProvider` is restated
+# here (http is the shipped fetch provider); a profile that fetches through
+# something else restates both keys in its own patch layer.
+#
+# No key is written here, ever: `apiKeyEnv` names a credential reference that
+# is resolved once per search from the harness credential service or the
+# launch environment.
+
+- insert:
+    - id: web-search-brave
+      name: '@coldcanuk/dsh-web-search-brave'
+      config:
+        apiKeyEnv: BRAVE_SEARCH_API_KEY
+
+- id: web
+  config:
+    searchProvider: brave-official
+    fetchProvider: http
