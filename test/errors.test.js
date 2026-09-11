@@ -103,13 +103,18 @@ test('abortable passes a value through and rejects on a later caller abort', asy
   controller.abort();
   await assert.rejects(pending, (error) => error.code === WEB_ABORTED);
   // An uncooperative operation that settles after the abort must not become an
-  // unhandled rejection: the settlement handlers stay attached.
+  // unhandled rejection: the settlement handlers stay attached. The deferred is
+  // built by hand rather than with `Promise.withResolvers()`, which is Node 22+
+  // while `engines` allows Node 20.
   const rejections = [];
   const onRejection = (reason) => rejections.push(reason);
   process.on('unhandledRejection', onRejection);
-  const late = Promise.withResolvers();
-  await assert.rejects(abortable(late.promise, controller.signal), (error) => error.code === WEB_ABORTED);
-  late.reject(new Error('too late'));
+  let rejectLate;
+  const late = new Promise((_resolve, reject) => {
+    rejectLate = reject;
+  });
+  await assert.rejects(abortable(late, controller.signal), (error) => error.code === WEB_ABORTED);
+  rejectLate(new Error('too late'));
   await new Promise((resolve) => setTimeout(resolve, 10));
   process.off('unhandledRejection', onRejection);
   assert.deepEqual(rejections, [], 'a late rejection must be observed, not left unhandled');

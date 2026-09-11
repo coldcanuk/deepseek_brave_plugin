@@ -126,7 +126,7 @@ dependency; nothing here consumes the plugin by name:
 
 ```sh
 npm install
-npm test               # 160 tests, no key and no network required
+npm test               # 161 tests, no key and no network required
 npm run check          # every gate CI runs: tests, secrets, declarations, coverage
 ```
 
@@ -416,7 +416,7 @@ npm install
 npm test
 ```
 
-`npm test` runs `node --test` with no file arguments, so Node's own discovery finds the suite — 160
+`npm test` runs `node --test` with no file arguments, so Node's own discovery finds the suite — 161
 tests across `test/config.test.js`, `test/map.test.js`, `test/client.test.js`,
 `test/provider.test.js`, `test/plugin.test.js`, `test/secrets.test.js`, `test/errors.test.js`,
 `test/attempt-timeout.test.js`, `test/keepalive.test.js`, and `test/check-secrets.test.js`. The
