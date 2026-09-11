@@ -126,8 +126,8 @@ dependency; nothing here consumes the plugin by name:
 
 ```sh
 npm install
-npm test               # 117 tests, no key and no network required
-npm run check:secrets  # the credential scan (see SECURITY.md)
+npm test               # 160 tests, no key and no network required
+npm run check          # every gate CI runs: tests, secrets, declarations, coverage
 ```
 
 From a local clone, useful while developing a change — a path works anywhere a git spec does:
@@ -241,22 +241,29 @@ replaces it.
 | `secretManager` | `auto` \| `none` \| `gnome-keyring` \| `pass` | `auto` | Which password manager to consult besides the harness credential store. `auto` tries the GNOME keyring, then `pass`; `none` disables both. |
 | `gnomeKeyringAttributes` | object of strings | `{ "service": "dsh-web-search-brave" }` | Attributes identifying the GNOME keyring item, exactly as `secret-tool lookup` receives them. |
 | `passPath` | string | `dsh/brave-search-api` | Entry path inside the `pass` password store. |
-| `baseURL` | string | `BRAVE_SEARCH_BASE_URL`, then `https://api.search.brave.com/res/v1` | `/res/v1` included; the mode's path is appended. |
+| `baseURL` | string | `BRAVE_SEARCH_BASE_URL`, then `https://api.search.brave.com/res/v1` | `/res/v1` included; the mode's path is appended. Must be an absolute http(s) URL with no credentials, query, or fragment. A value that was set but is unusable is **not** replaced by the default — the provider reports itself unavailable instead, so a search fails loudly rather than going somewhere unintended. |
 | `mode` | `llm-context` \| `web-search` | `llm-context` | Which endpoint answers a search. |
-| `country` | string | `us` | ISO 3166-1 alpha-2 country code. |
-| `searchLang` | string | `en` | ISO 639-1 language code. |
+| `country` | string | `us` | ISO 3166-1 alpha-2 country code, e.g. `us` or `gb`. Rejected by the schema if it is not two letters. |
+| `searchLang` | string | `en` | ISO 639-1 language code with an optional region, e.g. `en` or `pt-br`. Rejected by the schema otherwise. |
 | `safesearch` | `off` \| `moderate` \| `strict` | unset | Unset omits the parameter, leaving Brave's default in force. |
-| `freshness` | string | unset | `pd`, `pw`, `pm`, `py`, or `YYYY-MM-DDtoYYYY-MM-DD`. Unset omits the parameter. |
+| `freshness` | string | unset | `pd`, `pw`, `pm`, `py`, or `YYYY-MM-DDtoYYYY-MM-DD`, validated by the schema — Brave answers anything else with a 422. Unset omits the parameter. |
 | `count` | number, 1–50 | `20` | Clamped to 50 in `llm-context` mode and **20** in `web-search` mode. A request-level `maxResults` wins. |
 | `maxTokens` | number, 1024–32768 | `8192` | `llm-context` mode only; sent as `maximum_number_of_tokens`. |
 | `contextThresholdMode` | `strict` \| `balanced` \| `lenient` \| `disabled` | unset | `llm-context` mode only. Unset omits the parameter. |
 | `timeoutMs` | number, >= 1 | `30000` | Per attempt, not per search. Brave recommends 30 s. |
 | `maxAttempts` | number, 1–10 | `3` | Total attempts, first one included, for retryable failures. |
-| `retryBaseMs` | number, >= 0 | `250` | Base of the exponential backoff between attempts. |
-| `minIntervalMs` | number, >= 0 | `0` | Minimum spacing between dispatched searches; `0` disables the client-side throttle. |
+| `retryBaseMs` | number, 0–30000 | `250` | Base of the exponential backoff between attempts. The client caps every computed delay at 30 s, so a larger base cannot produce a longer wait. |
+| `minIntervalMs` | number, 0–60000 | `0` | Minimum spacing between dispatched searches; `0` disables the client-side throttle. Bounded because the value reaches a `setTimeout`, whose 32-bit field would otherwise overflow and silently turn the spacing off. |
 
 Values outside a numeric range are clamped into it, and enum-ish values that are not recognised
 fall back to the default, so one bad field cannot disable the provider.
+
+`baseURL` is the one option that is a **trust setting rather than a tuning knob**, because it
+decides which host receives the subscription-token header. Leave it unset in production so the
+Brave default applies, and set it only to a host you operate or explicitly trust — a corporate
+egress proxy, or the local mock while testing. There is no compiled-in host allowlist, and
+`SECURITY.md` explains what that means, which mitigations are in place (redirects are refused, the
+key never enters the URL), and how to check what a running harness actually resolved.
 
 ### Parameters sent
 
@@ -325,9 +332,12 @@ avoided so consumers that already handle the harness's other web providers need 
 - **Redirects are refused** (`redirect: 'error'`) before the target is contacted, so a
   misconfigured base URL cannot bounce a request that carries the subscription header to a third
   party. A refused redirect is not retried.
-- **Timeout** — each attempt gets its own `AbortSignal.timeout(timeoutMs)`. A caller cancellation
-  surfaces as `WEB_ABORTED`; our own timeout surfaces as `WEB_PROVIDER_ERROR` naming the limit
-  ("timed out after 30000 ms").
+- **Timeout** — each attempt gets its own deadline (`timeoutMs`), armed on a referenced timer that is
+  held for the request *and* its body read, then released as soon as the attempt settles. A caller
+  cancellation surfaces as `WEB_ABORTED`; our own timeout surfaces as `WEB_PROVIDER_ERROR` naming the
+  limit ("timed out after 30000 ms"). The timer is referenced rather than `AbortSignal.timeout`
+  because an unreferenced timer lets Node exit while an attempt is still pending, which would surface
+  as an unsettled promise instead of a timeout.
 - **Retries** — `429`, `408`, any `5xx`, and transient transport failures (a dropped connection,
   a refused connection) are retried with exponential backoff: `retryBaseMs × 2^(attempt-1)`. A
   `Retry-After` header, in seconds or as an HTTP date, wins over the computed delay and is capped
@@ -406,21 +416,83 @@ npm install
 npm test
 ```
 
-`npm test` runs `node --test "test/**/*.test.js"` — 117 tests across `test/config.test.js`,
-`test/map.test.js`, `test/client.test.js`, `test/provider.test.js`, `test/plugin.test.js`, and
-`test/secrets.test.js`. The suite is hermetic: the provider tests start a real `node:http` server
-on an ephemeral loopback port (`test/helpers/mock-brave.js`) and point `baseURL` at it, so no test
-touches the public internet, none needs an API key, and none spawns a real `secret-tool` or `pass`
-(an injected `execFile` seam stands in). The transport tests drive an injected `fetch`, so retry,
-timeout, and cancellation behavior is asserted deterministically rather than by sleeping.
+`npm test` runs `node --test` with no file arguments, so Node's own discovery finds the suite — 160
+tests across `test/config.test.js`, `test/map.test.js`, `test/client.test.js`,
+`test/provider.test.js`, `test/plugin.test.js`, `test/secrets.test.js`, `test/errors.test.js`,
+`test/attempt-timeout.test.js`, `test/keepalive.test.js`, and `test/check-secrets.test.js`. The
+suite is hermetic: the provider tests start a real `node:http` server on an ephemeral loopback port
+(`test/helpers/mock-brave.js`) and point `baseURL` at it, so no test touches the public internet,
+none needs an API key, and none spawns a real `secret-tool` or `pass` (an injected `execFile` seam
+stands in). The transport tests drive an injected `fetch`, so retry, timeout, and cancellation
+behavior is asserted deterministically rather than by sleeping.
+
+`npm test` then hands the runner's output to `scripts/check-test-gate.mjs`, which fails the run if
+fewer than 100 tests actually executed. That guard exists because a test command can look green
+while running nothing: a glob that matches no files is reported as a *vacuous success* (`tests 0`,
+exit code 0) on Node 21 and newer. Use `npm run test:raw` when you want the bare `node --test`
+output without the gate, and `npm run check:test-gate` to run only the gate.
+
+Discovery is used instead of an explicit pattern on purpose. Globs in the runner's positional
+arguments arrived in Node 21, while `engines` allows Node 20 — where a quoted pattern such as
+`"test/**/*.test.js"` is not expanded at all, so Node looks for a file with that literal name and
+the command cannot pass. A bare directory (`node --test test/`) is matched as a path and fails to
+load rather than being scanned, so neither form is portable across the supported range. No-argument
+discovery resolves the same files on every version. `test/keepalive.test.js` spawns child processes
+to pin the related transport guarantee: a pending attempt keeps the event loop alive until its own
+deadline fires, and a settled one releases its timer immediately. That guarantee is why the
+per-attempt deadline uses a referenced `setTimeout` rather than `AbortSignal.timeout()`, whose timer
+is unref'd: with an unref'd timer, an attempt whose transport holds no handle of its own lets Node
+exit with an unsettled promise, which the suite used to observe as every later test in the file
+being cancelled.
+
+### Every gate, and what each one protects
+
+```sh
+npm test                 # discovery + the vacuous-run floor
+npm run check:secrets    # the credential scan (see SECURITY.md)
+npm run check:lint       # Biome, recommended rules, warnings are errors
+npm run check:types      # runtime exports vs. the hand-authored .d.ts
+npm run check:types:tsc  # the declarations, type-checked by tsc
+npm run test:coverage    # coverage report
+npm run check:coverage   # coverage report with enforced floors
+npm run check            # all of the above, in order
+```
+
+`npm run check:types` is the answer to the risk that comes with hand-authored declarations:
+nothing in the toolchain otherwise ties `lib/types/*.d.ts` to the `lib/*.js` beside it. It compares
+the two export surfaces in both directions — a runtime export with no declaration, or a declared
+value that does not exist at runtime, fails the run. It was added because the check found real
+drift on its first run. `npm run check:types:tsc` uses the committed `tsconfig.json` (`noEmit`, so
+nothing is ever written) to type-check the declarations themselves and the peer types they import;
+it is the half that `tsc` cannot do — proving the declarations match the JavaScript — that
+`check:types` covers.
+
+`npm run check:lint` runs Biome with its recommended rules and `--error-on-warnings`, so a finding
+fails the build rather than scrolling past. The formatter and the assist actions are disabled on
+purpose: this tree's formatting is deliberate and a lint gate should not rewrite it. The config
+excludes the style preferences the codebase deliberately does not follow (template literals over
+concatenation, `console` in CLI scripts) so that the remaining rules are all real defects.
+
+`npm run check:coverage` gates coverage rather than only reporting it. The floors (95% lines, 88%
+branches, 92% functions, measured over `lib/`) sit a few points below the current baseline, so they
+catch a new untested path without failing on ordinary churn.
+
+### Continuous integration
+
+`.github/workflows/ci.yml` runs the same commands on every push to `main`, every pull request, and
+on demand: install, `npm test`, the secret scan, the lint, the declaration checks, and the coverage
+floors, on Node 20, 22, and 24. The matrix covers the floor and the ceiling of the declared `engines`
+range with a point in between, on the theory that a break is most likely at an edge. Dependabot keeps
+dependencies moving, but a Dependabot pull request proves nothing by itself — this workflow is what
+gates it. The file is short by design: it invokes the npm scripts rather than reimplementing them,
+so a red check is always reproducible with the command printed above it.
 
 `npm run check:secrets` is the credential scan. It reads exactly what `git add -A` would publish —
 tracked files plus untracked files `.gitignore` does not exclude — and exits non-zero if anything
 looks like a key, printing the path, the line, and the pattern name but never the matched text.
-
-The script names the test files explicitly because Node 22 and newer treat positional arguments to
-`node --test` as glob patterns; a bare directory (`node --test test/`) is matched as a path and
-fails to load instead of being scanned.
+`test/check-secrets.test.js` pins the patterns against lines that must be caught
+(`x-subscription-token = "..."`, `apiKey: "..."`, a bare `bsa…` value) and look-alikes that must not
+be (the reference-based `apiKeyEnv` field, short placeholders).
 
 ## Package layout
 
@@ -435,8 +507,14 @@ lib/secrets.js     GNOME keyring and pass lookups for the credential
 lib/types/*.d.ts   hand-authored declarations for every lib module
 cordis.patch.yml   bundle patch layer: registers the provider, pins ctx.web at
                    brave-official, and ships so `dsh plugin add` composes it
+tsconfig.json      no-emit config behind `npm run check:types:tsc`
+biome.json         lint config behind `npm run check:lint` (formatter disabled)
 scripts/           check-secrets.mjs: the credential scan behind `npm run check:secrets`
+                   check-test-gate.mjs: the vacuous-test-run guard behind `npm test`
+                   check-types.mjs: runtime exports vs. the .d.ts declarations
 test/              node:test suite plus the mock Brave server and the fake tool runners
+.github/           workflows/ci.yml: the gate that runs every one of the above on each
+                   push and PR; dependabot.yml: weekly dependency updates
 ```
 
 ## License
