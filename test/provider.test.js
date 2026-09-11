@@ -115,7 +115,7 @@ test('an empty result set is a result, not an error', async (t) => {
 
 test('a wrong-shaped body is an error rather than a silent empty answer', async (t) => {
   const { provider } = await startHarness(t, { script: [{ body: { unexpected: true } }] });
-  await rejectsWith(provider.search({ query: 'q' }), WEB_PROVIDER_ERROR, /neither a "grounding" nor a "sources"/u);
+  await rejectsWith(provider.search({ query: 'q' }), WEB_PROVIDER_ERROR, /no "grounding" envelope/u);
 });
 
 test('a body that is not JSON at all is an error', async (t) => {
@@ -154,7 +154,7 @@ test('a missing credential is reported without any request leaving the process',
   assert.equal(error.code, WEB_PROVIDER_CREDENTIAL_MISSING);
   assert.match(error.message, new RegExp(DEFAULT_API_KEY_ENV, 'u'));
   assert.match(error.message, /Settings > Plugins > Plugin configuration > Web search/u);
-  assert.match(error.message, /names the credential; it never holds the key itself/u, 'the message must teach the name-versus-value distinction');
+  assert.match(error.message, /names the credential and never supplies one/u, 'the message must teach the name-versus-value distinction');
   assert.equal(server.requests.length, 0);
 });
 
@@ -206,6 +206,43 @@ test('a key pasted into the reference field is never echoed in the failure', asy
   assert.equal(error.code, WEB_PROVIDER_CREDENTIAL_MISSING);
   assert.equal(error.message.includes(pasted), false, 'the pasted value must not be copied into the message');
   assert.match(error.message, /it looks like a key, not a name/u);
+  // The settings service still persists whatever was typed into the field, so the
+  // message must say so rather than leaving the operator believing nothing was
+  // written down anywhere.
+  assert.match(error.message, /rotate it/u);
+});
+
+test('a pasted key of any vendor shape is withheld, not just a Brave one', async (t) => {
+  // The reference field is free text. A key pasted from another vendor is not a
+  // Brave token, but it is still a secret that must not reach a message the model
+  // and the session log both read.
+  for (const pasted of ['AKIA' + 'IOSFODNN7EXAMPLE', 'ghp_' + 'AbCdEfGhIjKlMnOpQrStUvWx', 'sk-' + 'AbCdEfGhIjKlMnOpQrStUvWx']) {
+    const { provider } = await startHarness(t, { environment: {}, config: { apiKeyEnv: pasted, secretManager: 'none' }, script: [] });
+    const error = await capture(provider.search({ query: 'q' }));
+    assert.equal(error.code, WEB_PROVIDER_CREDENTIAL_MISSING);
+    assert.equal(error.message.includes(pasted), false, `${pasted.slice(0, 4)}… must not be echoed`);
+  }
+});
+
+test('a request with no usable query is rejected before the credential is resolved', async (t) => {
+  // The transport would otherwise send `q=undefined`, and a non-JSON-safe value
+  // would make the session refuse the recorded request event. Both are caller
+  // errors, and neither should reach Brave as a malformed search.
+  const asked = [];
+  const credentials = {
+    resolve: async (ref) => {
+      asked.push(String(ref));
+      return { value: SUBSCRIPTION_TOKEN, source: 'file' };
+    },
+  };
+  const { server, provider } = await startHarness(t, { environment: {}, credentials, script: [{ body: llmContextBody() }] });
+  for (const request of [{}, { query: '' }, { query: '   ' }, { query: undefined }, { query: 42 }]) {
+    const error = await capture(provider.search(request));
+    assert.equal(error.code, WEB_PROVIDER_ERROR, `${JSON.stringify(request)} must be a provider-input error`);
+    assert.match(error.message, /non-empty string query/u);
+  }
+  assert.deepEqual(asked, [], 'no credential should be resolved for a request that cannot be dispatched');
+  assert.equal(server.requests.length, 0, 'nothing may reach the network');
 });
 
 test('the missing-credential error lists every source that was tried', async (t) => {
@@ -216,6 +253,25 @@ test('the missing-credential error lists every source that was tried', async (t)
   assert.match(error.message, /gnome-keyring/u);
   assert.match(error.message, /pass \(/u);
   assert.match(error.message, /launch environment/u);
+});
+
+test('a failing credential provider is reported without echoing its own message', async (t) => {
+  // This path has no resolved value to redact against, so the underlying error's
+  // text cannot be trusted to be secret-free: a credential provider is free to
+  // quote what it read. Only the error's name and a labelled reference are safe.
+  const secretInError = 'bsa' + 'Z'.repeat(30);
+  const credentials = {
+    resolve: async () => {
+      throw new Error(`could not read the stored value ${secretInError}`);
+    },
+  };
+  const { server, provider } = await startHarness(t, { credentials, script: [{ body: llmContextBody() }] });
+  const error = await capture(provider.search({ query: 'q' }));
+  assert.equal(error.code, WEB_PROVIDER_ERROR);
+  assert.equal(error.message.includes(secretInError), false, 'the provider error text must not be copied through');
+  assert.match(error.message, /credential resolution failed/u);
+  assert.match(error.message, /Error/u, 'the error name is the only part that is surfaced');
+  assert.equal(server.requests.length, 0);
 });
 
 test('a 429 is retried and the search still succeeds', async (t) => {
@@ -308,13 +364,22 @@ test('a settings change reaches the next search without re-registering the provi
   assert.equal(provider.id, PROVIDER_ID);
 });
 
-test('available() is local: true for a usable base URL, false for an unparseable one', async (t) => {
+test('available() fails closed for an explicitly unusable base URL, and only then', async (t) => {
   const { provider } = await startHarness(t, {});
   assert.equal(provider.available(), true);
-  const broken = new BraveSearchProvider(() => resolveOptions(contextWith(), { baseURL: 'not a url' }));
-  assert.equal(broken.available(), false);
-  const relative = new BraveSearchProvider(() => resolveOptions(contextWith(), { baseURL: '/res/v1' }));
-  assert.equal(relative.available(), false);
+  // A base URL that was *set* but cannot be used must not be replaced by the
+  // default: doing so would send the subscription token to a host the operator did
+  // not choose, which is the outcome the validation exists to prevent. The
+  // provider therefore reports itself unavailable — the seam then skips it rather
+  // than dispatching anywhere.
+  for (const baseURL of ['not a url', '/res/v1', 'javascript:alert(1)', 'https://user:pass@example.test/res/v1']) {
+    const refused = new BraveSearchProvider(() => resolveOptions(contextWith(), { baseURL }));
+    assert.equal(refused.available(), false, `${baseURL} must leave the provider unavailable`);
+    assert.equal(refused.available(), false, 'the check must stay local and repeatable');
+  }
+  // A resolved set that is unusable for any other reason reports false too.
+  const unusable = new BraveSearchProvider(() => ({ ...resolveOptions(contextWith(), {}), minIntervalMs: Number.MAX_SAFE_INTEGER }));
+  assert.equal(unusable.available(), false);
 });
 
 test('a blank base URL falls back to the default rather than counting as unusable', () => {
