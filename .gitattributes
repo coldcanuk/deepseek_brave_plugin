@@ -1,0 +1,7 @@
+# Normalize line endings in the repository; preserve CRLF for Windows scripts.
+* text=auto eol=lf
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Mark generated/vendored trees as non-diffable in review UIs.
+package-lock.json -diff linguist-generated

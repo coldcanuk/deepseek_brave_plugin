@@ -1,0 +1,73 @@
+# ============================================================================
+# dsh-web-search-brave — .gitignore
+#
+# This repository is public. The secret section below is a security control,
+# not a formality: if a credential ever lands in the working tree it must not
+# be committable. See SECURITY.md.
+# ============================================================================
+
+# --- Secrets: never commit a credential -------------------------------------
+.env
+.env.*
+!.env.example
+*.secret
+credentials.json
+secrets.json
+*.pem
+*.key
+*.p12
+*.pfx
+.dsh/
+
+# --- Dependencies and package-manager stores --------------------------------
+node_modules/
+.pnpm-store/
+.yarn/cache/
+.yarn/install-state.gz
+jspm_packages/
+
+# --- Logs (a log line is a leak vector; none of these are ever committed) ----
+*.log
+npm-debug.log*
+pnpm-debug.log*
+yarn-error.log*
+lerna-debug.log*
+
+# --- Test and coverage output -----------------------------------------------
+coverage/
+.nyc_output/
+test-results/
+*.lcov
+
+# --- Runtime junk ------------------------------------------------------------
+*.pid
+*.tsbuildinfo
+.cache/
+.npm-cache/
+dist/
+build/
+out/
+tmp/
+
+# --- Editors and operating systems ------------------------------------------
+.vscode/*
+!.vscode/extensions.json
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ============================================================================
+# Deliberately NOT ignored — these are shipped and must be committed:
+#   lib/                 hand-authored ESM source and hand-authored .d.ts.
+#                        lib/ is SOURCE, not build output: this package has no
+#                        build step, so it is versioned like any other source.
+#   test/                the node:test suite (test/helpers/ included)
+#   *.md                 README.md, SECURITY.md, CHANGELOG.md
+#   package-lock.json    the lockfile is committed on purpose so an install is
+#                        reproducible; do not add it to this file.
+#   .env.example         placeholder names only, never a real value
+# ============================================================================
